@@ -3,6 +3,7 @@
  */
 
 #include <proto/exec.h>
+#include <proto/dos.h>
 #include <proto/alib.h>
 #include <libraries/bsdsocket.h>
 #include <midi/camddevices.h>
@@ -14,7 +15,7 @@
 #include "proto.h"
 #include "parser.h"
 
-#define NUM_PORTS 4
+#define NUM_PORTS 8
 
 typedef ULONG (* ASM tx_func_t)(REG(a2, APTR) userdata);
 typedef void (* ASM rx_func_t)(REG(d0, UWORD input), REG(a2, APTR userdata));
@@ -57,6 +58,7 @@ static struct MidiDeviceData my_dev = {
 };
 
 struct ExecBase *SysBase;
+struct DosLibrary *DOSBase;
 static struct Task *main_task;
 static struct Task *worker_task;
 static BYTE main_sig;
@@ -66,9 +68,12 @@ static int activate_portmask;
 static struct SignalSemaphore sem;
 
 // UDP config
+#define NAME_LEN 80
+static char server_name[NAME_LEN] = "localhost";
+static char client_name[NAME_LEN] = "localhost";
 static struct proto_handle proto = {
-    .server_name = "localhost",
-    .client_name = "localhost",
+    .server_name = server_name,
+    .client_name = client_name,
     .server_port = 6820,
     .client_port = 6821
 };
@@ -82,6 +87,72 @@ struct port_data {
     struct parser_handle parser;
 };
 struct port_data ports[NUM_PORTS];
+
+/* Config Driver */
+
+#define CONFIG_FILE "ENV:midi/udp.config"
+#define ARG_TEMPLATE \
+    "CLIENT_HOST/K,CLIENT_PORT/K/N," \
+    "SERVER_HOST/K,SERVER_PORT/K/N,"
+struct ConfigParam {
+    STRPTR client_host;
+    ULONG *client_port;
+    STRPTR server_host;
+    ULONG *server_port;
+};
+
+static void parse_args(struct ConfigParam *param)
+{
+    if(param->client_host != NULL) {
+        D(("set client host: %s\n", param->client_host));
+        strncpy(client_name, param->client_host, NAME_LEN);
+    }
+    if(param->client_port != NULL) {
+        D(("set client port: %ld\n", *param->client_port));
+        proto.client_port = *param->client_port;
+    }
+    if(param->server_host != NULL) {
+        D(("set server host: %s\n", param->server_host));
+        strncpy(server_name, param->server_host, NAME_LEN);
+    }
+    if(param->server_port != NULL) {
+        D(("set server port: %ld\n", *param->server_port));
+        proto.server_port = *param->server_port;
+    }
+}
+
+static void config_driver(void)
+{
+    BPTR cfginput, oldinput;
+    struct ConfigParam cfg_param;
+    struct RDArgs *rda;
+
+    D(("config init:\n"));
+    memset(&cfg_param, 0, sizeof(cfg_param));
+
+    /* only need DOS for config */
+    if(DOSBase = (struct DosLibrary *)OpenLibrary ("dos.library",36)) {
+        /* try to read config */
+        if(cfginput = Open(CONFIG_FILE, MODE_OLDFILE)) {
+            D(("opened cfg file: " CONFIG_FILE "\n"));
+            oldinput = SelectInput(cfginput);      
+            rda = ReadArgs(ARG_TEMPLATE, (LONG *)&cfg_param, NULL);
+            if(rda != NULL) {
+                D(("got args\n"));
+                parse_args(&cfg_param);
+                FreeArgs(rda);
+            } else {
+                D(("failed parsing args!\n"));
+            }
+            Close(SelectInput(oldinput));
+        } else {
+            D(("cfg file not found: " CONFIG_FILE "\n"));
+        }
+        CloseLibrary((struct Library *)DOSBase);
+    } else {
+        D(("no DOS!\n"));
+    }
+}
 
 /* Worker Task */
 
@@ -221,6 +292,8 @@ static BOOL ASM Init(REG(a6, APTR sysbase))
     D(("midi: Init\n"));
     SysBase = sysbase;
     
+    config_driver();
+
     InitSemaphore(&sem);
 
     // init ports

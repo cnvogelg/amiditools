@@ -42,7 +42,11 @@ $(OBJ_DIR)/%.o : %.c
 	$(HIDE)$(CC) -c $(CFLAGS) $< -o $@
 
 $(DIST_DIR)/%: $(BIN_DIR)/%
-	@echo "  CP   $(@F)"
+	@echo "  DIST $(@F)"
+	$(HIDE)cp $< $@
+
+$(INSTALL_DIR)/%: $(BIN_DIR)/%
+	@echo "  INST $(@F)"
 	$(HIDE)cp $< $@
 
 # build app
@@ -110,8 +114,9 @@ $(DIST_DIR):
 
 DIST_FILES=$(patsubst $(BIN_DIR)/%,$(DIST_DIR)/%,$(TOOLS))
 
-install: $(TOOLS)
-	cp $(TOOL_PATHS) $(INSTALL_DIR)/
+INSTALL_FILES=$(patsubst $(BIN_DIR)/%,$(INSTALL_DIR)/%,$(TOOLS))
+
+install: init $(INSTALL_FILES)
 
 clean:
 	rm -rf $(BIN_DIR) $(DIST_DIR)

@@ -34,9 +34,10 @@ int udp_addr_setup(struct udp_handle *uh, struct sockaddr_in *addr,
 {
   /* resolve host */
   struct hostent *he;
+  D(("resolving host: '%s'\n", name));
   he = gethostbyname(name);
   if(he != NULL) {
-    D(("resolved host\n"));
+    D(("found!\n"));
 
     addr->sin_family = AF_INET;      /* host byte order */
     addr->sin_port = htons(port);  /* short, network byte order */
