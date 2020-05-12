@@ -1,3 +1,7 @@
+# build Amiga tools with vbcc/vasm/vlink
+
+FLAVOR?=debug
+
 CC=vc +aos68km
 
 VBCC_TARGET_AMIGAOS ?= $(VBCC)/targets/m68k-amigaos/
@@ -12,43 +16,113 @@ NDK_INC_ASM = $(NDK_DIR)/include/include_i
 CAMD_INC = include
 NET_INC ?= $(HOME)/projects/amidev/roadshow/netinclude
 
+CFLAGS_debug += -DKDEBUG=1
 CFLAGS = -c99 -Os -+ -sc -I$(VBCC_INC) -I$(NDK_INC) -I$(CAMD_INC) -I$(NET_INC)
-CFLAGS += -DKDEBUG=1
-LDFLAGS = -L$(VBCC_LIB) -L$(NDK_LIB)
+CFLAGS += $(CFLAGS_$(FLAVOR))
+LDFLAGS = -Os -+ -sc -L$(VBCC_LIB) -L$(NDK_LIB) -lamiga
 LDFLAGS_DRV = $(LDFLAGS) -nostdlib -ldebug
 
-TOOLS=midi-info midi-echo midi-send midi-recv midi-udp midi-expunge
+BUILD_DIR=build
+BIN_DIR=$(BUILD_DIR)/$(FLAVOR)
+OBJ_DIR=$(BUILD_DIR)/$(FLAVOR)/obj
+DIST_BASE_DIR=dist
+DIST_DIR=$(DIST_BASE_DIR)/$(FLAVOR)
 INSTALL_DIR=$(HOME)/amiga/shared
-H?=@
 
-all: $(TOOLS)
+HIDE?=@
+TOOLS :=
+VPATH=src
+
+# ----- rules -----
+all: init build
+
+# compile
+$(OBJ_DIR)/%.o : %.c
+	@echo "  CC   $(<F)"
+	$(HIDE)$(CC) -c $(CFLAGS) $< -o $@
+
+$(DIST_DIR)/%: $(BIN_DIR)/%
+	@echo "  CP   $(@F)"
+	$(HIDE)cp $< $@
+
+# build app
+# $1 = app name
+# $2 = src files
+define build-app
+TOOLS += $(BIN_DIR)/$1
+$1: $(BIN_DIR)/$1
+$(BIN_DIR)/$1: $(patsubst %.c,$(OBJ_DIR)/%.o,$2)
+	@echo "  APP  $$(@F)"
+	$(HIDE)$(CC) -o $$@ $$+ $(LDFLAGS)
+endef
+
+# build drv
+# $1 = drv name
+# $2 = src files
+define build-drv
+TOOLS += $(BIN_DIR)/$1
+$1: $(BIN_DIR)/$1
+$(BIN_DIR)/$1: $(patsubst %.c,$(OBJ_DIR)/%.o,$2)
+	@echo "  DRV  $$(@F)"
+	$(HIDE)$(CC) -o $$@ $$+ $(LDFLAGS_DRV)
+endef
+
+# midi-info
+MIDI_INFO_SRCS=midi-info.c
+$(eval $(call build-app,midi-info,$(MIDI_INFO_SRCS)))
+
+# midi-expunge
+MIDI_EXPUNGE_SRCS=midi-expunge.c
+$(eval $(call build-app,midi-expunge,$(MIDI_EXPUNGE_SRCS)))
+
+# midi-echo
+MIDI_ECHO_SRCS=midi-echo.c midi-setup.c
+$(eval $(call build-app,midi-echo,$(MIDI_ECHO_SRCS)))
+
+# midi-send
+MIDI_SEND_SRCS=midi-send.c midi-setup.c
+$(eval $(call build-app,midi-send,$(MIDI_SEND_SRCS)))
+
+# midi-recv
+MIDI_RECV_SRCS=midi-recv.c midi-setup.c
+$(eval $(call build-app,midi-recv,$(MIDI_RECV_SRCS)))
+
+# midi-drv-udp
+MIDI_UDPDRV_SRCS=midi-udpdrv.c debug.c udp.c proto.c parser.c
+$(eval $(call build-drv,midi-udpdrv,$(MIDI_UDPDRV_SRCS)))
+
+init: $(BIN_DIR) $(OBJ_DIR)
+	@echo "  FLAVOR=$(FLAVOR)"
+
+build: $(TOOLS)
+
+release: 
+	$(MAKE) FLAVOR=release
+
+$(BIN_DIR):
+	@mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
+	@mkdir -p $(OBJ_DIR)
+
+$(DIST_DIR):
+	@mkdir -p $(DIST_DIR)
+
+DIST_FILES=$(patsubst $(BIN_DIR)/%,$(DIST_DIR)/%,$(TOOLS))
 
 install: $(TOOLS)
-	cp $(TOOLS) $(INSTALL_DIR)/
-
-midi-info: midi-info.c
-	@echo " CC  $@"
-	$(H)$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -lamiga
-
-midi-expunge: midi-expunge.c
-	@echo " CC  $@"
-	$(H)$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -lamiga
-
-midi-echo: midi-echo.c midi-setup.c
-	@echo " CC  $@"
-	$(H)$(CC) $(CFLAGS) -o $@ $+ $(LDFLAGS) -lamiga
-
-midi-send: midi-send.c midi-setup.c
-	@echo " CC  $@"
-	$(H)$(CC) $(CFLAGS) -o $@ $+ $(LDFLAGS) -lamiga
-
-midi-recv: midi-recv.c midi-setup.c
-	@echo " CC  $@"
-	$(H)$(CC) $(CFLAGS) -o $@ $+ $(LDFLAGS) -lamiga
-
-midi-udp: midi-udpdrv.c debug.c udp.c proto.c parser.c
-	@echo " CC  $@"
-	$(H)$(CC) $(CFLAGS) -o $@ $+ $(LDFLAGS_DRV) -lamiga
+	cp $(TOOL_PATHS) $(INSTALL_DIR)/
 
 clean:
-	rm -f $(TOOLS)
+	rm -rf $(BIN_DIR) $(DIST_DIR)
+
+clean-all:
+	rm -rf $(BUILD_DIR) $(DIST_BASE_DIR)
+
+dist-flavor: init $(DIST_DIR) $(DIST_FILES)
+
+dist:
+	@$(MAKE) dist-flavor
+	@$(MAKE) dist-flavor FLAVOR=release
+
+.PHONY: dist
