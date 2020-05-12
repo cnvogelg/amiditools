@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+
+import socket
+import struct
+import rtmidi
+import rtmidi.midiutil
+
+server_name = "localhost"
+server_port = 6820
+
+magic = 0x43414d44
+
+s = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+s.bind((server_name, server_port))
+print("midi-udp-bridge: waiting for data...")
+
+my_seq = 1
+
+def encode_msg(msg):
+    shift = 24
+    result = 0
+    for m in msg:
+        result |= m << shift
+        shift -= 8
+    return result
+
+def decode_msg(msg):
+    shift = 24
+    result = []
+    for i in range(3):
+        result.append((msg >> shift) & 0xff)
+    return result
+
+def midi_in_handler(msg_time, data=None):
+    global my_seq
+    msg, time = msg_time
+    print("in:", msg_time)
+    ts = 0
+    cmd = 0
+    reply = struct.pack(">IIII", magic, my_seq, cmd, ts)
+    #s.sendto(reply, addr)
+    my_seq += 1
+
+midi_out, _ = rtmidi.midiutil.open_midioutput(port_name="udp-out", use_virtual=True)
+midi_in, _ = rtmidi.midiutil.open_midiinput(port_name="udp-in", use_virtual=True)
+midi_in.set_callback(midi_in_handler)
+midi_in.ignore_types(sysex=False, timing=False, active_sense=False)
+
+while(True):
+    data, addr = s.recvfrom(1024)
+    data_len = len(data)
+    print("from", addr, "got", data_len)
+    if data_len == 16:
+        msg = struct.unpack(">IIII", data)
+        if msg[0] == magic:
+            seq, cmd, ts = msg[1:]
+            print("seq=", seq, "cmd", hex(cmd), "ts", ts)
+            msg = decode_msg(cmd)
+            midi_out.send_message(msg)

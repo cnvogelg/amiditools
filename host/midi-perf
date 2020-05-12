@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+
+import mido
+import time
+
+mido.set_backend('mido.backends.portmidi')
+print(mido.backend)
+print("OUT:")
+print(mido.get_output_names())
+print("IN:")
+print(mido.get_input_names())
+
+in_name = "Amiga Out"
+out_name = "Amiga In"
+in_port = mido.open_input(in_name)
+out_port = mido.open_output(out_name)
+
+while True:
+    msg = mido.Message('note_on')
+    start = time.perf_counter()
+    out_port.send(msg)
+    in_msg = in_port.receive()
+    end = time.perf_counter()
+    delta = end - start
+    print("delta:", delta * 1000)
+    if in_msg != msg:
+        print("MISMATCH")
+    time.sleep(1)

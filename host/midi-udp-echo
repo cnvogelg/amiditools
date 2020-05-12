@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+
+import socket
+import struct
+
+server_name = "localhost"
+server_port = 6820
+
+magic = 0x43414d44
+
+s = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+s.bind((server_name, server_port))
+print("midi-udp-echo: waiting for data...")
+
+my_seq = 1
+while(True):
+    data, addr = s.recvfrom(1024)
+    data_len = len(data)
+    print("from", addr, "got", data_len)
+    if data_len == 16:
+        msg = struct.unpack(">IIII", data)
+        if msg[0] == magic:
+            seq, cmd, ts = msg[1:]
+            print("seq=", seq, "cmd", hex(cmd), "ts", ts)
+            reply = struct.pack(">IIII", magic, my_seq, cmd, ts)
+            s.sendto(reply, addr)
+            my_seq += 1
