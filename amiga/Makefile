@@ -31,7 +31,7 @@ INSTALL_DIR=$(HOME)/amiga/shared
 
 HIDE?=@
 TOOLS :=
-VPATH=src
+VPATH=src src/drv
 
 # ----- rules -----
 all: init build
