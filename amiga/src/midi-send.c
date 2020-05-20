@@ -11,8 +11,10 @@
 
 #include "midi-setup.h"
 
+#define DEFAULT_CLUSTER "mmp.out.0"
+
 static const char *TEMPLATE = 
-    "OUT/A,"
+    "OUT/K,"
     "V/VERBOSE/S,"
     "CMDS/M";
 typedef struct {
@@ -27,15 +29,72 @@ typedef struct {
     int   (*run_cmd)(int num_args, char **args);
 } cmd_t;
 
+typedef union {
+    LONG  cmd;
+    UBYTE b[4];
+} MidiCmd;
+
 struct DosLibrary *DOSBase;
 struct UtilityBase *UtilityBase;
 static params_t params;
 static BOOL verbose;
-
+static struct MidiLink *tx;
 /* command state */
 static int hex_mode = 0;
 static int midi_channel = 0; /* 0..15 */
 static int octave_middle_c = 3;
+
+/* send midi */
+static void midi3(UBYTE status, UBYTE data1, UBYTE data2)
+{
+    MidiCmd mc;
+    mc.mm_Status = status;
+    mc.mm_Data1 = data1;
+    mc.mm_Data2 = data2;
+    PutMidi(tx, mc.cmd);
+}
+
+static void midi2(UBYTE status, UBYTE data1)
+{
+    MidiCmd mc;
+    mc.mm_Status = status;
+    mc.mm_Data1 = data1;
+    PutMidi(tx, mc.cmd);
+}
+
+static void midi1(UBYTE status)
+{
+    MidiCmd mc;
+    mc.mm_Status = status;
+    PutMidi(tx, mc.cmd);
+}
+
+static void midi_cc(UBYTE ctl, UBYTE val)
+{
+    midi3(MS_Ctrl | midi_channel, ctl, val);
+}
+
+static void midi_rpn(UWORD num, UWORD val)
+{
+    midi_cc(101, num >> 7);
+    midi_cc(100, num & 0x7f);
+    midi_cc(6, val >> 7);
+    midi_cc(38, val & 0x7f);
+    midi_cc(101, 0x7f);
+    midi_cc(100, 0x7f);
+}
+
+static void midi_nrpn(UWORD num, UWORD val)
+{
+    midi_cc(99, num >> 7);
+    midi_cc(98, num & 0x7f);
+    midi_cc(6, val >> 7);
+    midi_cc(38, val & 0x7f);
+    midi_cc(101, 0x7f);
+    midi_cc(100, 0x7f);
+}
+
+/* parsing */
 
 static int get_digit(char c)
 {
@@ -102,6 +161,15 @@ static BYTE parse_number_7bit(char *str)
     return (BYTE)val;
 }
 
+static WORD parse_number_14bit(char *str)
+{
+    LONG val = parse_number(str);
+    if((val < 0) || (val > 0x3fff)) {
+        return -1;
+    }
+    return (WORD)val;
+}
+
 static BYTE parse_note(char *str)
 {
     /* is it a number? */
@@ -164,6 +232,8 @@ static BYTE parse_note(char *str)
 
 /* ---- commands ---- */
 
+/* channel voice messages */
+
 static int cmd_hex(int num_args, char **args)
 {
     hex_mode = 1;
@@ -216,6 +286,7 @@ static int cmd_on(int num_args, char **args)
     if(verbose)
         Printf("on: note=%ld/$%lx velocity=%ld/$%lx\n", note, note, velocity, velocity);
 
+    midi3(MS_NoteOn | midi_channel, note, velocity);
     return 0;
 }
 
@@ -229,6 +300,271 @@ static int cmd_off(int num_args, char **args)
     if(verbose)
         Printf("off: note=%ld/$%lx velocity=%ld/$%lx\n", note, note, velocity, velocity);
 
+    midi3(MS_NoteOff | midi_channel, note, velocity);
+    return 0;
+}
+
+static int cmd_pp(int num_args, char **args)
+{
+    BYTE note = parse_note(args[0]);
+    BYTE aftertouch = parse_number_7bit(args[1]);
+    if((note == -1) || (aftertouch == -1)) {
+        return 1;
+    }
+    if(verbose)
+        Printf("poly pressure: note=%ld/$%lx aftertouch=%ld/$%lx\n", note, note, aftertouch, aftertouch);
+
+    midi3(MS_PolyPress | midi_channel, note, aftertouch);
+    return 0;
+}
+
+static int cmd_cc(int num_args, char **args)
+{
+    BYTE ctl = parse_number_7bit(args[0]);
+    BYTE val = parse_number_7bit(args[1]);
+    if((ctl == -1) || (val == -1)) {
+        return 1;
+    }
+    if(verbose)
+        Printf("control change: ctl=%ld/$%lx val=%ld/$%lx\n", ctl, ctl, val, val);
+
+    midi_cc(ctl, val);
+    return 0;
+}
+
+static int cmd_pc(int num_args, char **args)
+{
+    BYTE prg = parse_number_7bit(args[0]);
+    if(prg == -1) {
+        return 1;
+    }
+    if(verbose)
+        Printf("program change: prg=%ld/$%lx\n", prg, prg);
+
+    midi2(MS_Prog | midi_channel, prg);
+    return 0;
+}
+
+static int cmd_cp(int num_args, char **args)
+{
+    BYTE aftertouch = parse_number_7bit(args[0]);
+    if(aftertouch == -1) {
+        return 1;
+    }
+    if(verbose)
+        Printf("channel pressure: at=%ld/$%lx\n", aftertouch, aftertouch);
+
+    midi2(MS_ChanPress | midi_channel, aftertouch);
+    return 0;
+}
+
+static int cmd_pb(int num_args, char **args)
+{
+    WORD val = parse_number_14bit(args[0]);
+    if(val == -1) {
+        return 1;
+    }
+    if(verbose)
+        Printf("pitch bend: val=%ld/$%lx\n", val, val);
+
+    BYTE lsb = (BYTE)(val & 0x7f);
+    BYTE msb = (BYTE)(val >> 7);
+    midi3(MS_PitchBend | midi_channel, lsb, msb);
+    return 0;
+}
+
+static int cmd_rpn(int num_args, char **args)
+{
+    WORD ctl = parse_number_14bit(args[0]);
+    WORD val = parse_number_14bit(args[1]);
+    if((ctl == -1) || (val == -1)) {
+        return 1;
+    }
+    if(verbose)
+        Printf("rpn: ctl=%5ld/$%ld val=%ld/$%lx\n", ctl, ctl, val, val);
+
+    midi_rpn(ctl, val);
+    return 0;
+}
+
+static int cmd_nrpn(int num_args, char **args)
+{
+    WORD ctl = parse_number_14bit(args[0]);
+    WORD val = parse_number_14bit(args[1]);
+    if((ctl == -1) || (val == -1)) {
+        return 1;
+    }
+    if(verbose)
+        Printf("nrpn: ctl=%5ld/$%ld val=%ld/$%lx\n", ctl, ctl, val, val);
+
+    midi_nrpn(ctl, val);
+    return 0;
+}
+
+static int cmd_panic(int num_args, char **args)
+{
+    if(verbose)
+        PutStr("panic\n");
+
+    for(UBYTE ch=0;ch<15;ch++) {
+        midi3(MS_Ctrl | ch, 64, 0);
+        midi3(MS_Ctrl | ch, 120, 0);
+        midi3(MS_Ctrl | ch, 123, 0);
+        for(UBYTE note=0;note<=127;note++) {
+            midi3(MS_NoteOff | ch, note, 0);
+        }
+    }
+    return 0;
+}
+
+/* system rt messages */
+
+static int cmd_mc(int num_args, char **args)
+{
+    if(verbose)
+        PutStr("midi clock\n");
+
+    midi1(MS_Clock);
+    return 0;
+}
+
+static int cmd_start(int num_args, char **args)
+{
+    if(verbose)
+        PutStr("start\n");
+
+    midi1(MS_Start);
+    return 0;
+}
+
+static int cmd_stop(int num_args, char **args)
+{
+    if(verbose)
+        PutStr("stop\n");
+
+    midi1(MS_Stop);
+    return 0;
+}
+
+static int cmd_cont(int num_args, char **args)
+{
+    if(verbose)
+        PutStr("cont\n");
+
+    midi1(MS_Continue);
+    return 0;
+}
+
+static int cmd_as(int num_args, char **args)
+{
+    if(verbose)
+        PutStr("active sensing\n");
+
+    midi1(MS_ActvSense);
+    return 0;
+}
+
+static int cmd_rst(int num_args, char **args)
+{
+    if(verbose)
+        PutStr("reset\n");
+
+    midi1(MS_Reset);
+    return 0;
+}
+
+/* system common messages */
+
+static int cmd_syx(int num_args, char **args)
+{
+    Printf("num_args: %ld\n", num_args);
+
+    ULONG buf_len = 2 + num_args;
+    UBYTE *data = AllocVec(buf_len, 0);
+    if(data == NULL) {
+        PutStr("Out of memory!\n");
+        return 1;
+    }
+
+    /* prepare sysex buffer */
+    data[0] = MS_SysEx;
+    data[buf_len-1] = MS_EOX;
+    UBYTE *ptr = data + 1;
+    for(int i=0;i<num_args;i++) {
+        BYTE val = parse_number_7bit(args[i]);
+        if(val == -1) {
+            FreeVec(data);
+            return 2;
+        }
+        *ptr = val;
+        ptr++;
+    }
+
+    if(verbose) {
+        PutStr("sys ex: ");
+        for(int i=0;i<buf_len;i++) {
+            Printf("$%02lx ", data[i]);
+        }
+        PutStr("\n");
+    }
+
+    /* send sysex */
+    PutSysEx(tx, data);
+
+    /* free buffer */
+    FreeVec(data);
+    return 0;
+}
+
+static int cmd_tc(int num_args, char **args)
+{
+    BYTE mt = parse_number_7bit(args[0]);
+    BYTE val = parse_number_7bit(args[1]);
+    if((mt == -1) || (val == -1)) {
+        return 1;
+    }
+    if(verbose)
+        Printf("time code: mt=%5ld/$%ld val=%ld/$%lx\n", mt, mt, val, val);
+
+    BYTE s = mt << 4 | val;
+    midi2(MS_QtrFrame, s);
+    return 0;
+}
+
+static int cmd_spp(int num_args, char **args)
+{
+    WORD val = parse_number_14bit(args[0]);
+    if(val == -1) {
+        return 1;
+    }
+    if(verbose)
+        Printf("song position: val=%ld/$%lx\n", val, val);
+
+    BYTE lsb = (BYTE)(val & 0x7f);
+    BYTE msb = (BYTE)(val >> 7);
+    midi3(MS_SongPos, lsb, msb);
+    return 0;
+}
+
+static int cmd_ss(int num_args, char **args)
+{
+    BYTE val = parse_number_7bit(args[0]);
+    if(val == -1) {
+        return 1;
+    }
+    if(verbose)
+        Printf("song select: val=%ld/$%lx\n", val, val);
+
+    midi2(MS_SongSelect, val);
+    return 0;
+}
+
+static int cmd_tun(int num_args, char **args)
+{
+    if(verbose)
+        PutStr("tune request\n");
+
+    midi1(MS_TuneReq);
     return 0;
 }
 
@@ -238,8 +574,30 @@ static cmd_t commands[] = {
     { "dec", 0, cmd_dec },
     { "omc", 1, cmd_omc },
     { "ch", 1, cmd_ch },
+    /* channel voice messages */
     { "on", 2, cmd_on },
     { "off", 2, cmd_off },
+    { "pp", 2, cmd_pp },
+    { "cc", 2, cmd_cc },
+    { "pc", 1, cmd_pc },
+    { "cp", 1, cmd_cp },
+    { "pb", 1, cmd_pb },
+    { "rpn", 2, cmd_rpn },
+    { "nrpn", 2, cmd_nrpn },
+    { "panic", 0, cmd_panic },
+    /* system rt messages */
+    { "mc", 0, cmd_mc },
+    { "start", 0, cmd_start },
+    { "stop", 0, cmd_stop },
+    { "cont", 0, cmd_cont },
+    { "as", 0, cmd_as },
+    { "rst", 0, cmd_rst },
+    /* system common messages */
+    { "syx", -1, cmd_syx },
+    { "tc", 2, cmd_tc },
+    { "spp", 1, cmd_spp },
+    { "ss", 1, cmd_ss },
+    { "tun", 0, cmd_tun },
     { NULL, 0, NULL } /* terminator */
 };
 
@@ -297,6 +655,7 @@ static int run(char *cluster, char **cmds)
         midi_close(&ms);
         return res;
     }
+    tx = ms.tx_link;
 
     /* main loop */
     if(verbose) {
@@ -347,7 +706,13 @@ int main(int argc, char **argv)
                     verbose = 1;
                 }
 
-                result = run(params.out_cluster, cmds);
+                /* pick cluster */
+                char *cluster = DEFAULT_CLUSTER;
+                if(params.out_cluster != NULL) {
+                    cluster = params.out_cluster;
+                }
+
+                result = run(cluster, cmds);
             }
 
             FreeArgs(args);
