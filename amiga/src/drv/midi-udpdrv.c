@@ -14,7 +14,7 @@
 #include "compiler.h"
 #include "udp.h"
 #include "proto.h"
-#include "parser.h"
+#include "midi-parser.h"
 
 #define NUM_PORTS 8
 #define DEFAULT_SYSEX_SIZE 2048
@@ -89,7 +89,7 @@ struct port_data {
     rx_func_t rx_func;
     struct MidiPortData port_data;
     APTR user_data;
-    struct parser_handle parser;
+    struct midi_parser_handle parser;
 };
 struct port_data ports[NUM_PORTS];
 
@@ -178,9 +178,9 @@ static void port_xmit(int portnum)
             break;
         }
         D(("TX: %02lx\n", data));
-        int res = parser_feed(&pd->parser, data);
+        int res = midi_parser_feed(&pd->parser, data);
         // send regular message
-        if(res == PARSER_RET_MSG) {
+        if(res == MIDI_PARSER_RET_MSG) {
             MidiMsg msg;
             msg.l[0] = pd->parser.msg;
             D(("cmd %08lx\n", msg.l[0]));
@@ -191,7 +191,7 @@ static void port_xmit(int portnum)
             }
         }
         // send sysex
-        else if(res == PARSER_RET_SYSEX_OK) {
+        else if(res == MIDI_PARSER_RET_SYSEX_OK) {
             MidiMsg msg;
             msg.mm_Status = MS_SysEx;
             D(("cmds %08lx\n", msg.l[0]));
@@ -227,7 +227,7 @@ static void port_recv(void)
             }
             // regular message
             else {
-                int num_bytes = parser_midi_len(status);
+                int num_bytes = midi_parser_get_cmd_len(status);
                 for(int i=0;i<num_bytes;i++) {
                     D(("rx: %02lx\n", msg.b[i]));
                     pd->rx_func(msg.b[i], pd->user_data);
@@ -387,8 +387,8 @@ static SAVEDS ASM struct MidiPortData *OpenPort(
 {
     D(("midi: OpenPort(%ld)\n", portnum));
     if(portnum < NUM_PORTS) {
-        if(parser_init(&ports[portnum].parser, SysBase, (UBYTE)portnum,
-                       sysex_max_size)!=0) {
+        if(midi_parser_init(&ports[portnum].parser, SysBase, (UBYTE)portnum,
+                            sysex_max_size)!=0) {
             D(("midi: parser_init failed!\n"));
             return NULL;
         }
@@ -414,7 +414,7 @@ static ASM void ClosePort(
         ports[portnum].tx_func = NULL;
         ports[portnum].rx_func = NULL;
         ReleaseSemaphore(&sem);
-        parser_exit(&ports[portnum].parser);
+        midi_parser_exit(&ports[portnum].parser);
     }
 }
 

@@ -5,12 +5,12 @@
 
 #include "compiler.h"
 #include "debug.h"
-#include "parser.h"
+#include "midi-parser.h"
 
 #define SysBase ph->sysBase
 
-int parser_init(struct parser_handle *ph, struct ExecBase *sysBase,
-                UBYTE port_num, ULONG max_sysex_size)
+int midi_parser_init(struct midi_parser_handle *ph, struct ExecBase *sysBase,
+                     UBYTE port_num, ULONG max_sysex_size)
 {
     ph->sysBase = sysBase;
     ph->port_num = port_num;
@@ -25,14 +25,14 @@ int parser_init(struct parser_handle *ph, struct ExecBase *sysBase,
     return 0;
 }
 
-void parser_exit(struct parser_handle *ph)
+void midi_parser_exit(struct midi_parser_handle *ph)
 {
     if(ph->sysex_buf != NULL) {
         FreeVec(ph->sysex_buf);
     }
 }
 
-static int sysex_data(struct parser_handle *ph, UBYTE data)
+static int sysex_data(struct midi_parser_handle *ph, UBYTE data)
 {
     // store in buffer if some room is left
     if(ph->sysex_left > 0) {
@@ -43,10 +43,10 @@ static int sysex_data(struct parser_handle *ph, UBYTE data)
     ph->sysex_bytes++;
     D(("parser: sysex data: %lx (left=%ld, bytes=%ld)\n", data,
        ph->sysex_left, ph->sysex_bytes));
-    return PARSER_RET_NONE;
+    return MIDI_PARSER_RET_NONE;
 }
 
-static int sysex_begin(struct parser_handle *ph)
+static int sysex_begin(struct midi_parser_handle *ph)
 {
     D(("parser: sysex begin\n"));
 
@@ -68,7 +68,7 @@ static int sysex_begin(struct parser_handle *ph)
     return sysex_data(ph, MS_SysEx);
 }
 
-static int sysex_end(struct parser_handle *ph)
+static int sysex_end(struct midi_parser_handle *ph)
 {
     // store EOX byte
     sysex_data(ph, MS_EOX);
@@ -77,13 +77,13 @@ static int sysex_end(struct parser_handle *ph)
 
     // did the whole sysex block fit into buffer?
     if((ph->sysex_buf == NULL) || (ph->sysex_bytes > ph->sysex_max)) {
-        return PARSER_RET_SYSEX_TOO_LARGE;
+        return MIDI_PARSER_RET_SYSEX_TOO_LARGE;
     } else {
-        return PARSER_RET_SYSEX_OK;
+        return MIDI_PARSER_RET_SYSEX_OK;
     }
 }
 
-static int handle_sysex(struct parser_handle *ph, UBYTE data)
+static int handle_sysex(struct midi_parser_handle *ph, UBYTE data)
 {
     // sysex begin?
     if(data == MS_SysEx) {
@@ -99,44 +99,44 @@ static int handle_sysex(struct parser_handle *ph, UBYTE data)
     }
     // no sysex. but a realtime message (that might interleave sysex)
     else if((data & 0xf8) == 0xf8) {
-        return PARSER_RET_INTERNAL;
+        return MIDI_PARSER_RET_INTERNAL;
     }
     // any other message
     else {
         // reset previous sysex state
         ph->sysex_bytes = 0;
         ph->sysex_left = 0;
-        return PARSER_RET_INTERNAL;
+        return MIDI_PARSER_RET_INTERNAL;
     }
 }
 
-int parser_feed(struct parser_handle *ph, UBYTE data)
+int midi_parser_feed(struct midi_parser_handle *ph, UBYTE data)
 {
     // new command
     if(ph->bytes_left == 0) {
         // check for sysex
         int res = handle_sysex(ph, data);
-        if(res != PARSER_RET_INTERNAL) {
+        if(res != MIDI_PARSER_RET_INTERNAL) {
             return res;
         }
         // its a status byte: message begin
         if((data & 0x80) == 0x80) {            
-            int len = parser_midi_len(data);
+            int len = midi_parser_get_cmd_len(data);
             ph->last_len = len;
             ph->last_status = data;
             if(len == -1) {
                 // invalid command
                 D(("parser: invalid command %08lx\n", (ULONG)data));
-                return PARSER_RET_ERROR;
+                return MIDI_PARSER_RET_ERROR;
             } else {
                 // setup msg
                 ph->msg = data << 24 | ph->port_num;
                 if(len == 1) {
-                    return PARSER_RET_MSG;
+                    return MIDI_PARSER_RET_MSG;
                 } else {
                     ph->bytes_left = len - 1;
                     ph->bytes_pos = 16;
-                    return PARSER_RET_NONE;
+                    return MIDI_PARSER_RET_NONE;
                 }
             }
         }
@@ -144,11 +144,11 @@ int parser_feed(struct parser_handle *ph, UBYTE data)
         else {
             ph->msg = ph->last_status << 24 | data << 16 | ph->port_num;
             if(ph->last_len == 2) {
-                return PARSER_RET_MSG;
+                return MIDI_PARSER_RET_MSG;
             } else {
                 ph->bytes_left = ph->last_len - 2;
                 ph->bytes_pos = 8;
-                return PARSER_RET_NONE;
+                return MIDI_PARSER_RET_NONE;
             }
         }
     }
@@ -158,14 +158,14 @@ int parser_feed(struct parser_handle *ph, UBYTE data)
         ph->bytes_left --;
         ph->bytes_pos -= 8;
         if(ph->bytes_left == 0) {
-            return PARSER_RET_MSG;
+            return MIDI_PARSER_RET_MSG;
         } else {
-            return PARSER_RET_NONE;
+            return MIDI_PARSER_RET_NONE;
         }
     }
 }
 
-int parser_midi_len(UBYTE status)
+int midi_parser_get_cmd_len(UBYTE status)
 {
     if((status & 0x80) == 0) {
         return -1;
