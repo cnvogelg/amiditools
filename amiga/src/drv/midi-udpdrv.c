@@ -8,6 +8,7 @@
 #include <libraries/bsdsocket.h>
 #include <midi/camddevices.h>
 #include <midi/camd.h>
+#include <midi/mididefs.h>
 
 #include "debug.h"
 #include "compiler.h"
@@ -16,6 +17,7 @@
 #include "parser.h"
 
 #define NUM_PORTS 8
+#define DEFAULT_SYSEX_SIZE 2048
 
 typedef ULONG (* ASM tx_func_t)(REG(a2, APTR) userdata);
 typedef void (* ASM rx_func_t)(REG(d0, UWORD input), REG(a2, APTR userdata));
@@ -78,6 +80,9 @@ static struct proto_handle proto = {
     .client_port = 6821
 };
 
+// more config
+static ULONG sysex_max_size = DEFAULT_SYSEX_SIZE;
+
 // port data
 struct port_data {
     tx_func_t tx_func;
@@ -93,12 +98,14 @@ struct port_data ports[NUM_PORTS];
 #define CONFIG_FILE "ENV:midi/udp.config"
 #define ARG_TEMPLATE \
     "CLIENT_HOST/K,CLIENT_PORT/K/N," \
-    "SERVER_HOST/K,SERVER_PORT/K/N,"
+    "SERVER_HOST/K,SERVER_PORT/K/N," \
+    "SYSEX_SIZE/K/N"
 struct ConfigParam {
     STRPTR client_host;
     ULONG *client_port;
     STRPTR server_host;
     ULONG *server_port;
+    ULONG *sysex_size;
 };
 
 static void parse_args(struct ConfigParam *param)
@@ -118,6 +125,10 @@ static void parse_args(struct ConfigParam *param)
     if(param->server_port != NULL) {
         D(("set server port: %ld\n", *param->server_port));
         proto.server_port = *param->server_port;
+    }
+    if(param->sysex_size != NULL) {
+        D(("set sysex size: %ld\n", *param->sysex_size));
+        sysex_max_size = *param->sysex_size;
     }
 }
 
@@ -167,12 +178,26 @@ static void port_xmit(int portnum)
             break;
         }
         D(("TX: %02lx\n", data));
-        if(parser_feed(&pd->parser, data)) {
+        int res = parser_feed(&pd->parser, data);
+        // send regular message
+        if(res == PARSER_RET_MSG) {
             MidiMsg msg;
             msg.l[0] = pd->parser.msg;
             D(("cmd %08lx\n", msg.l[0]));
 
             int res = proto_send_msg(&proto, &msg);
+            if(res != 0) {
+                D(("send err: %ld\n", res));
+            }
+        }
+        // send sysex
+        else if(res == PARSER_RET_SYSEX_OK) {
+            MidiMsg msg;
+            msg.mm_Status = MS_SysEx;
+            D(("cmds %08lx\n", msg.l[0]));
+
+            int res = proto_send_msg_buf(&proto, &msg, 
+                pd->parser.sysex_buf, pd->parser.sysex_bytes);
             if(res != 0) {
                 D(("send err: %ld\n", res));
             }
@@ -190,10 +215,23 @@ static void port_recv(void)
         if(port < NUM_PORTS) {
             struct port_data *pd = &ports[port];
             UBYTE status = msg.mm_Status;
-            int num_bytes = parser_midi_len(status);
-            for(int i=0;i<num_bytes;i++) {
-                D(("rx: %02lx\n", msg.b[i]));
-                pd->rx_func(msg.b[i], pd->user_data);
+            // is sysex?
+            if(status == MS_SysEx) {
+                ULONG num_bytes = 0;
+                UBYTE *buf = NULL;
+                proto_get_msg_buf(&proto, &buf, &num_bytes);
+                for(ULONG i=0;i<num_bytes;i++) {
+                    D(("rxs: %02lx\n", buf[i]));
+                    pd->rx_func(buf[i], pd->user_data);
+                }
+            }
+            // regular message
+            else {
+                int num_bytes = parser_midi_len(status);
+                for(int i=0;i<num_bytes;i++) {
+                    D(("rx: %02lx\n", msg.b[i]));
+                    pd->rx_func(msg.b[i], pd->user_data);
+                }
             }
         }
     } else {
@@ -259,7 +297,7 @@ SAVEDS static void task_main(void)
         goto init_done;
     }
 
-    if(proto_init(&proto, SysBase) != 0) {
+    if(proto_init(&proto, SysBase, sysex_max_size) != 0) {
         D(("midi: proto_init failed!\n"));
         goto init_done;
     }
@@ -349,7 +387,8 @@ static SAVEDS ASM struct MidiPortData *OpenPort(
 {
     D(("midi: OpenPort(%ld)\n", portnum));
     if(portnum < NUM_PORTS) {
-        if(parser_init(&ports[portnum].parser, SysBase, (UBYTE)portnum)!=0) {
+        if(parser_init(&ports[portnum].parser, SysBase, (UBYTE)portnum,
+                       sysex_max_size)!=0) {
             D(("midi: parser_init failed!\n"));
             return NULL;
         }

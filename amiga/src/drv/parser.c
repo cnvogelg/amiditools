@@ -1,46 +1,154 @@
 #define __NOLIBBASE__
 #include <proto/exec.h>
 #include <midi/camd.h>
+#include <midi/mididefs.h>
 
 #include "compiler.h"
 #include "debug.h"
 #include "parser.h"
 
-#define SysBase uh->sysBase
+#define SysBase ph->sysBase
 
-int parser_init(struct parser_handle *ph, struct ExecBase *sysBase, UBYTE port_num)
+int parser_init(struct parser_handle *ph, struct ExecBase *sysBase,
+                UBYTE port_num, ULONG max_sysex_size)
 {
     ph->sysBase = sysBase;
     ph->port_num = port_num;
     ph->bytes_left = 0;
     ph->bytes_pos = 0;
 
+    ph->sysex_buf = NULL;
+    ph->sysex_bytes = 0;
+    ph->sysex_left = 0;
+    ph->sysex_max = max_sysex_size;
+
     return 0;
 }
 
 void parser_exit(struct parser_handle *ph)
 {
+    if(ph->sysex_buf != NULL) {
+        FreeVec(ph->sysex_buf);
+    }
+}
 
+static int sysex_data(struct parser_handle *ph, UBYTE data)
+{
+    // store in buffer if some room is left
+    if(ph->sysex_left > 0) {
+        ph->sysex_buf[ph->sysex_bytes] = data;
+        ph->sysex_left--;
+    }
+    // always count byte
+    ph->sysex_bytes++;
+    D(("parser: sysex data: %lx (left=%ld, bytes=%ld)\n", data,
+       ph->sysex_left, ph->sysex_bytes));
+    return PARSER_RET_NONE;
+}
+
+static int sysex_begin(struct parser_handle *ph)
+{
+    D(("parser: sysex begin\n"));
+
+    // first use allocs buffer
+    if(ph->sysex_buf == NULL) {
+        ph->sysex_buf = AllocVec(ph->sysex_max, 0);
+    }
+
+    // bytes are only left if we got a buffer
+    if(ph->sysex_buf != NULL) {
+        ph->sysex_left = ph->sysex_max;
+    } else {
+        ph->sysex_left = 0;
+        D(("parser: NO sysex mem!\n"));
+    }
+    ph->sysex_bytes = 0;
+
+    // store first byte
+    return sysex_data(ph, MS_SysEx);
+}
+
+static int sysex_end(struct parser_handle *ph)
+{
+    // store EOX byte
+    sysex_data(ph, MS_EOX);
+
+    D(("parser: sysex end: size=%ld max=%ld\n", ph->sysex_bytes, ph->sysex_max));
+
+    // did the whole sysex block fit into buffer?
+    if((ph->sysex_buf == NULL) || (ph->sysex_bytes > ph->sysex_max)) {
+        return PARSER_RET_SYSEX_TOO_LARGE;
+    } else {
+        return PARSER_RET_SYSEX_OK;
+    }
+}
+
+static int handle_sysex(struct parser_handle *ph, UBYTE data)
+{
+    // sysex begin?
+    if(data == MS_SysEx) {
+        return sysex_begin(ph);
+    }
+    // sysex end?
+    else if(data == MS_EOX) {
+        return sysex_end(ph);
+    }
+    // sysex data
+    else if(((data & 0x80) == 0) && (ph->sysex_bytes > 0)) {
+        return sysex_data(ph, data);
+    }
+    // no sysex. but a realtime message (that might interleave sysex)
+    else if((data & 0xf8) == 0xf8) {
+        return PARSER_RET_INTERNAL;
+    }
+    // any other message
+    else {
+        // reset previous sysex state
+        ph->sysex_bytes = 0;
+        ph->sysex_left = 0;
+        return PARSER_RET_INTERNAL;
+    }
 }
 
 int parser_feed(struct parser_handle *ph, UBYTE data)
 {
     // new command
     if(ph->bytes_left == 0) {
-        int len = parser_midi_len(data);
-        if(len == -1) {
-            // invalid command
-            D(("parser: invalid command %08lx\n", (ULONG)data));
-            return 0;
-        } else {
-            // setup msg
-            ph->msg = data << 24 | ph->port_num;
-            if(len == 1) {
-                return 1;
+        // check for sysex
+        int res = handle_sysex(ph, data);
+        if(res != PARSER_RET_INTERNAL) {
+            return res;
+        }
+        // its a status byte: message begin
+        if((data & 0x80) == 0x80) {            
+            int len = parser_midi_len(data);
+            ph->last_len = len;
+            ph->last_status = data;
+            if(len == -1) {
+                // invalid command
+                D(("parser: invalid command %08lx\n", (ULONG)data));
+                return PARSER_RET_ERROR;
             } else {
-                ph->bytes_left = len - 1;
-                ph->bytes_pos = 16;
-                return 0;
+                // setup msg
+                ph->msg = data << 24 | ph->port_num;
+                if(len == 1) {
+                    return PARSER_RET_MSG;
+                } else {
+                    ph->bytes_left = len - 1;
+                    ph->bytes_pos = 16;
+                    return PARSER_RET_NONE;
+                }
+            }
+        }
+        // its data -> status byte was omitted, repeat last status
+        else {
+            ph->msg = ph->last_status << 24 | data << 16 | ph->port_num;
+            if(ph->last_len == 2) {
+                return PARSER_RET_MSG;
+            } else {
+                ph->bytes_left = ph->last_len - 2;
+                ph->bytes_pos = 8;
+                return PARSER_RET_NONE;
             }
         }
     }
@@ -50,9 +158,9 @@ int parser_feed(struct parser_handle *ph, UBYTE data)
         ph->bytes_left --;
         ph->bytes_pos -= 8;
         if(ph->bytes_left == 0) {
-            return 1;
+            return PARSER_RET_MSG;
         } else {
-            return 0;
+            return PARSER_RET_NONE;
         }
     }
 }

@@ -10,17 +10,17 @@
 
 #define SysBase ph->sysBase
 
-#define BUF_SIZE 256
 #define MAGIC    0x43414d44     // CAMD
 
-int proto_init(struct proto_handle *ph, struct ExecBase *sysBase)
+int proto_init(struct proto_handle *ph, struct ExecBase *sysBase, ULONG data_max_size)
 {
     ph->sysBase = sysBase;
+    ph->buf_max_bytes = data_max_size + 20; /* account for header */
     ph->tx_seq_num = 1;
     ph->rx_seq_num = 0;
 
     // allocate transfer buffer
-    ph->buf = AllocVec(BUF_SIZE, MEMF_PUBLIC);
+    ph->buf = AllocVec(ph->buf_max_bytes, MEMF_PUBLIC);
     if(ph->buf == NULL) {
         D(("proto: no mem!\n"));
         return 5;
@@ -79,28 +79,58 @@ int proto_send_msg(struct proto_handle *ph, MidiMsg *msg)
     return udp_send(&ph->udp, ph->udp_fd, &ph->server_addr, buf, 16);
 }
 
+int proto_send_msg_buf(struct proto_handle *ph, MidiMsg *msg, UBYTE *src_buf, ULONG size)
+{
+    ULONG *buf = (ULONG *)ph->buf;
+    buf[0] = MAGIC;
+    buf[1] = ph->tx_seq_num++;
+    buf[2] = msg->l[0];
+    buf[3] = msg->l[1];
+
+    memcpy(&buf[4], src_buf, size);
+
+    return udp_send(&ph->udp, ph->udp_fd, &ph->server_addr, buf, 20 + size);
+}
+
 int proto_recv_msg(struct proto_handle *ph, MidiMsg *msg)
 {
     struct sockaddr_in client_addr;
-    int res = udp_recv(&ph->udp, ph->udp_fd, &client_addr, ph->buf, 16);
-    if(res != 16) {
+    int res = udp_recv(&ph->udp, ph->udp_fd, &client_addr, ph->buf, ph->buf_max_bytes);
+    if(res < 16) {
         return 1;
     }
 
     ULONG *buf = (ULONG *)ph->buf;
+    // check magic
     if(buf[0] != MAGIC) {
         D(("proto: no magic!\n"));
         return 2;
     }
 
+    // check sequence number
     ph->rx_seq_num++;
     if(ph->rx_seq_num != buf[1]) {
         D(("proto: rx_seq_num mismatch: %ld != %ld", ph->rx_seq_num, buf[1]));
     }
 
+    // retrieve midi msg
     msg->l[0] = buf[2];
     msg->l[1] = buf[3];
+
+    // store extra size    
+    if(res >= 16) {
+        ph->buf_extra_bytes = res - 16;
+    } else {
+        ph->buf_extra_bytes = 0;
+    }
+
     return 0;
+}
+
+void proto_get_msg_buf(struct proto_handle *ph, UBYTE **buf, ULONG *size)
+{
+    *size = ph->buf_extra_bytes;
+    *buf = ph->buf + 16;
 }
 
 int proto_wait_recv(struct proto_handle *ph, ULONG timeout, ULONG *sigmask)
