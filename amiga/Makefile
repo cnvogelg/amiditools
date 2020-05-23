@@ -91,9 +91,12 @@ $(eval $(call build-app,midi-send,$(MIDI_SEND_SRCS)))
 MIDI_RECV_SRCS=midi-recv.c midi-setup.c
 $(eval $(call build-app,midi-recv,$(MIDI_RECV_SRCS)))
 
+# common midi driver sources
+MIDI_DRV_SRCS=midi-drv.c debug.c midi-parser.c
+
 # midi-drv-udp
-MIDI_UDPDRV_SRCS=midi-drv.c midi-udpdrv.c debug.c udp.c proto.c midi-parser.c
-$(eval $(call build-drv,midi-udpdrv,$(MIDI_UDPDRV_SRCS)))
+MIDI_DRV_UDP_SRCS=$(MIDI_DRV_SRCS) midi-drv-udp.c udp.c proto.c
+$(eval $(call build-drv,midi-drv-udp,$(MIDI_DRV_UDP_SRCS)))
 
 init: $(BIN_DIR) $(OBJ_DIR)
 	@echo "  FLAVOR=$(FLAVOR)"
