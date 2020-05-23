@@ -477,8 +477,6 @@ static int cmd_rst(int num_args, char **args)
 
 static int cmd_syx(int num_args, char **args)
 {
-    Printf("num_args: %ld\n", num_args);
-
     ULONG buf_len = 2 + num_args;
     UBYTE *data = AllocVec(buf_len, 0);
     if(data == NULL) {

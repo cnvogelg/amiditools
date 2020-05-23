@@ -5,16 +5,14 @@ struct midi_parser_handle {
     struct ExecBase *sysBase;
     int bytes_left;
     int bytes_pos;
-    int last_len;
     UBYTE port_num;
-    UBYTE last_status;
 
     ULONG sysex_bytes;
     ULONG sysex_left;
     ULONG sysex_max;
     UBYTE *sysex_buf;
 
-    ULONG msg; // msg encodes: len | status | data1 | data2
+    midi_msg_t msg;
 };
 
 #define MIDI_PARSER_RET_NONE                 0
@@ -29,6 +27,5 @@ extern int midi_parser_init(struct midi_parser_handle *ph, struct ExecBase *sysB
 extern void midi_parser_exit(struct midi_parser_handle *ph);
 
 extern int midi_parser_feed(struct midi_parser_handle *ph, UBYTE data);
-extern int midi_parser_get_cmd_len(UBYTE status);
 
 #endif

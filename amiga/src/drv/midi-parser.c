@@ -5,6 +5,7 @@
 
 #include "compiler.h"
 #include "debug.h"
+#include "midi-msg.h"
 #include "midi-parser.h"
 
 #define SysBase ph->sysBase
@@ -64,6 +65,9 @@ static int sysex_begin(struct midi_parser_handle *ph)
     }
     ph->sysex_bytes = 0;
 
+    // store in msg
+    ph->msg.l = 0xf0000000;
+
     // store first byte
     return sysex_data(ph, MS_SysEx);
 }
@@ -110,62 +114,7 @@ static int handle_sysex(struct midi_parser_handle *ph, UBYTE data)
     }
 }
 
-int midi_parser_feed(struct midi_parser_handle *ph, UBYTE data)
-{
-    // new command
-    if(ph->bytes_left == 0) {
-        // check for sysex
-        int res = handle_sysex(ph, data);
-        if(res != MIDI_PARSER_RET_INTERNAL) {
-            return res;
-        }
-        // its a status byte: message begin
-        if((data & 0x80) == 0x80) {            
-            int len = midi_parser_get_cmd_len(data);
-            ph->last_len = len;
-            ph->last_status = data;
-            if(len == -1) {
-                // invalid command
-                D(("parser: invalid command %08lx\n", (ULONG)data));
-                return MIDI_PARSER_RET_ERROR;
-            } else {
-                // setup msg
-                ph->msg = data << 24 | ph->port_num;
-                if(len == 1) {
-                    return MIDI_PARSER_RET_MSG;
-                } else {
-                    ph->bytes_left = len - 1;
-                    ph->bytes_pos = 16;
-                    return MIDI_PARSER_RET_NONE;
-                }
-            }
-        }
-        // its data -> status byte was omitted, repeat last status
-        else {
-            ph->msg = ph->last_status << 24 | data << 16 | ph->port_num;
-            if(ph->last_len == 2) {
-                return MIDI_PARSER_RET_MSG;
-            } else {
-                ph->bytes_left = ph->last_len - 2;
-                ph->bytes_pos = 8;
-                return MIDI_PARSER_RET_NONE;
-            }
-        }
-    }
-    // data byte
-    else {
-        ph->msg |= data << ph->bytes_pos;
-        ph->bytes_left --;
-        ph->bytes_pos -= 8;
-        if(ph->bytes_left == 0) {
-            return MIDI_PARSER_RET_MSG;
-        } else {
-            return MIDI_PARSER_RET_NONE;
-        }
-    }
-}
-
-int midi_parser_get_cmd_len(UBYTE status)
+static int get_cmd_len(UBYTE status)
 {
     if((status & 0x80) == 0) {
         return -1;
@@ -212,3 +161,56 @@ int midi_parser_get_cmd_len(UBYTE status)
     return -1;
 }
 
+int midi_parser_feed(struct midi_parser_handle *ph, UBYTE data)
+{
+    // new command
+    if(ph->bytes_left == 0) {
+        // check for sysex
+        int res = handle_sysex(ph, data);
+        if(res != MIDI_PARSER_RET_INTERNAL) {
+            return res;
+        }
+        // its a status byte: message begin
+        if((data & 0x80) == 0x80) {            
+            int len = get_cmd_len(data);
+            if(len == -1) {
+                // invalid command
+                D(("parser: invalid command %08lx\n", (ULONG)data));
+                return MIDI_PARSER_RET_ERROR;
+            } else {
+                // setup msg
+                ph->msg.b[MIDI_MSG_SIZE] = len;
+                ph->msg.b[MIDI_MSG_STATUS] = data;
+                if(len == 1) {
+                    return MIDI_PARSER_RET_MSG;
+                } else {
+                    ph->bytes_left = len - 1;
+                    ph->bytes_pos = 1;
+                    return MIDI_PARSER_RET_NONE;
+                }
+            }
+        }
+        // its data -> status byte was omitted, repeat last status
+        else {
+            ph->msg.b[MIDI_MSG_DATA1] = data;
+            if(ph->msg.b[MIDI_MSG_SIZE] == 2) {
+                return MIDI_PARSER_RET_MSG;
+            } else {
+                ph->bytes_left = ph->msg.b[MIDI_MSG_SIZE] - 2;
+                ph->bytes_pos = 2;
+                return MIDI_PARSER_RET_NONE;
+            }
+        }
+    }
+    // data byte
+    else {
+        ph->msg.b[ph->bytes_pos] = data;
+        ph->bytes_left --;
+        ph->bytes_pos ++;
+        if(ph->bytes_left == 0) {
+            return MIDI_PARSER_RET_MSG;
+        } else {
+            return MIDI_PARSER_RET_NONE;
+        }
+    }
+}

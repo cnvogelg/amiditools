@@ -27,9 +27,10 @@ struct proto_handle {
 extern int proto_init(struct proto_handle *ph, struct ExecBase *sysBase, ULONG data_max_size);
 extern void proto_exit(struct proto_handle *ph);
 
-extern int proto_send_msg(struct proto_handle *ph, MidiMsg *msg);
-extern int proto_send_msg_buf(struct proto_handle *ph, MidiMsg *msg, UBYTE *buf, ULONG size);
-extern int proto_recv_msg(struct proto_handle *ph, MidiMsg *msg);
+extern int proto_send_msg(struct proto_handle *ph, int port, midi_msg_t msg);
+extern int proto_send_sysex(struct proto_handle *ph, int port, midi_msg_t msg, UBYTE *buf, ULONG size);
+
+extern int proto_recv_msg(struct proto_handle *ph, int *port, midi_msg_t *msg);
 extern void proto_get_msg_buf(struct proto_handle *ph, UBYTE **buf, ULONG *size);
 extern int proto_wait_recv(struct proto_handle *uh, ULONG timeout, ULONG *sigmask);
 

@@ -6,6 +6,7 @@
 #include "compiler.h"
 #include "debug.h"
 #include "udp.h"
+#include "midi-msg.h"
 #include "proto.h"
 
 #define SysBase ph->sysBase
@@ -68,31 +69,31 @@ void proto_exit(struct proto_handle *ph)
     FreeVec(ph->buf);
 }
 
-int proto_send_msg(struct proto_handle *ph, MidiMsg *msg)
+int proto_send_msg(struct proto_handle *ph, int port, midi_msg_t msg)
 {
     ULONG *buf = (ULONG *)ph->buf;
     buf[0] = MAGIC;
     buf[1] = ph->tx_seq_num++;
-    buf[2] = msg->l[0];
-    buf[3] = msg->l[1];
+    buf[2] = msg.l;
+    buf[3] = port;
 
     return udp_send(&ph->udp, ph->udp_fd, &ph->server_addr, buf, 16);
 }
 
-int proto_send_msg_buf(struct proto_handle *ph, MidiMsg *msg, UBYTE *src_buf, ULONG size)
+int proto_send_sysex(struct proto_handle *ph, int port, midi_msg_t msg, UBYTE *src_buf, ULONG size)
 {
     ULONG *buf = (ULONG *)ph->buf;
     buf[0] = MAGIC;
     buf[1] = ph->tx_seq_num++;
-    buf[2] = msg->l[0];
-    buf[3] = msg->l[1];
+    buf[2] = msg.l;
+    buf[3] = port;
 
     memcpy(&buf[4], src_buf, size);
 
-    return udp_send(&ph->udp, ph->udp_fd, &ph->server_addr, buf, 20 + size);
+    return udp_send(&ph->udp, ph->udp_fd, &ph->server_addr, buf, 16 + size);
 }
 
-int proto_recv_msg(struct proto_handle *ph, MidiMsg *msg)
+int proto_recv_msg(struct proto_handle *ph, int *port, midi_msg_t *msg)
 {
     struct sockaddr_in client_addr;
     int res = udp_recv(&ph->udp, ph->udp_fd, &client_addr, ph->buf, ph->buf_max_bytes);
@@ -113,9 +114,9 @@ int proto_recv_msg(struct proto_handle *ph, MidiMsg *msg)
         D(("proto: rx_seq_num mismatch: %ld != %ld", ph->rx_seq_num, buf[1]));
     }
 
-    // retrieve midi msg
-    msg->l[0] = buf[2];
-    msg->l[1] = buf[3];
+    // retrieve midi msg and port
+    msg->l = buf[2];
+    *port = buf[3];
 
     // store extra size    
     if(res >= 16) {

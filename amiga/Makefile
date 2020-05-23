@@ -92,7 +92,7 @@ MIDI_RECV_SRCS=midi-recv.c midi-setup.c
 $(eval $(call build-app,midi-recv,$(MIDI_RECV_SRCS)))
 
 # midi-drv-udp
-MIDI_UDPDRV_SRCS=midi-udpdrv.c debug.c udp.c proto.c midi-parser.c
+MIDI_UDPDRV_SRCS=midi-drv.c midi-udpdrv.c debug.c udp.c proto.c midi-parser.c
 $(eval $(call build-drv,midi-udpdrv,$(MIDI_UDPDRV_SRCS)))
 
 init: $(BIN_DIR) $(OBJ_DIR)
