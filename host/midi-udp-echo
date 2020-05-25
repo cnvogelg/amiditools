@@ -1,29 +1,20 @@
 #!/usr/bin/env python3
 
-import socket
-import struct
+from miditools.udpmidi import UDPServer
 
-server_name = "localhost"
-server_port = 6820
+with UDPServer() as s:
+    print("midi-udp-echo: waiting for data on {}".format(s))
 
-magic = 0x43414d44
+    my_seq = 1
+    while(True):
+        pkt, addr = s.recv()
+        print("recv from", addr, ":", pkt)
 
-s = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-s.bind((server_name, server_port))
-print("midi-udp-echo: waiting for data...")
+        # check seq num
+        seq_num = pkt.get_seq_num()
+        if my_seq != pkt.get_seq_num():
+            print("SEQ_NUM wrong: got={}, want={}".format(seq_num, my_seq))
+        my_seq += 1
 
-my_seq = 1
-while(True):
-    data, addr = s.recvfrom(1024)
-    data_len = len(data)
-    print("from", addr, "got", data_len)
-    if data_len >= 16:
-        msg = struct.unpack(">IIII", data[0:16])
-        if msg[0] == magic:
-            seq, cmd, port = msg[1:]
-            extra_bytes = data_len - 16
-            extra_data = data[16:]
-            print("seq=", seq, "cmd", hex(cmd), "port", port, "extra", extra_data)
-            reply = struct.pack(">IIII", magic, my_seq, cmd, port) + extra_data
-            s.sendto(reply, addr)
-            my_seq += 1
+        # echo reply
+        s.send(pkt, addr)

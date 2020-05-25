@@ -74,8 +74,8 @@ int proto_send_msg(struct proto_handle *ph, int port, midi_msg_t msg)
     ULONG *buf = (ULONG *)ph->buf;
     buf[0] = MAGIC;
     buf[1] = ph->tx_seq_num++;
-    buf[2] = msg.l;
-    buf[3] = port;
+    buf[2] = port;
+    buf[3] = msg.l;
 
     return udp_send(&ph->udp, ph->udp_fd, &ph->server_addr, buf, 16);
 }
@@ -85,8 +85,8 @@ int proto_send_sysex(struct proto_handle *ph, int port, midi_msg_t msg, UBYTE *s
     ULONG *buf = (ULONG *)ph->buf;
     buf[0] = MAGIC;
     buf[1] = ph->tx_seq_num++;
-    buf[2] = msg.l;
-    buf[3] = port;
+    buf[2] = port;
+    buf[3] = msg.l;
 
     memcpy(&buf[4], src_buf, size);
 
@@ -115,8 +115,8 @@ int proto_recv_msg(struct proto_handle *ph, int *port, midi_msg_t *msg)
     }
 
     // retrieve midi msg and port
-    msg->l = buf[2];
-    *port = buf[3];
+    msg->l = buf[3];
+    *port = buf[2];
 
     // store extra size    
     if(res >= 16) {

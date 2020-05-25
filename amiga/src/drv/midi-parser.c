@@ -35,6 +35,20 @@ void midi_parser_exit(struct midi_parser_handle *ph)
 
 static int sysex_data(struct midi_parser_handle *ph, UBYTE data)
 {
+    // store in message
+    if(ph->sysex_bytes == 0) {
+        ph->msg.b[MIDI_MSG_STATUS] = data;
+        ph->msg.b[MIDI_MSG_SIZE] = 1;
+    }
+    else if(ph->sysex_bytes == 1) {
+        ph->msg.b[MIDI_MSG_DATA1] = data;
+        ph->msg.b[MIDI_MSG_SIZE] = 2;
+    }
+    else if(ph->sysex_bytes == 2) {
+        ph->msg.b[MIDI_MSG_DATA2] = data;
+        ph->msg.b[MIDI_MSG_SIZE] = 3;
+    }
+
     // store in buffer if some room is left
     if(ph->sysex_left > 0) {
         ph->sysex_buf[ph->sysex_bytes] = data;
@@ -64,9 +78,6 @@ static int sysex_begin(struct midi_parser_handle *ph)
         D(("parser: NO sysex mem!\n"));
     }
     ph->sysex_bytes = 0;
-
-    // store in msg
-    ph->msg.l = 0xf0000000;
 
     // store first byte
     return sysex_data(ph, MS_SysEx);
