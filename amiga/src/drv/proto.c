@@ -17,7 +17,7 @@ int proto_init(struct proto_handle *ph, struct ExecBase *sysBase, ULONG data_max
 {
     ph->sysBase = sysBase;
     ph->buf_max_bytes = data_max_size + 20; /* account for header */
-    ph->tx_seq_num = 1;
+    ph->tx_seq_num = 0;
     ph->rx_seq_num = 0;
 
     // allocate transfer buffer

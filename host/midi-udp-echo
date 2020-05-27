@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 
-from miditools.udpmidi import UDPServer
+from miditools.udpmidi import MidiServer
 
-with UDPServer() as s:
-    print("midi-udp-echo: waiting for data on {}".format(s))
-
-    my_seq = 1
+with MidiServer() as srv:
+    print("midi-udp-echo: waiting for data on {}".format(srv))
     while(True):
-        pkt, addr = s.recv()
-        print("recv from", addr, ":", pkt)
-
-        # check seq num
-        seq_num = pkt.get_seq_num()
-        if my_seq != pkt.get_seq_num():
-            print("SEQ_NUM wrong: got={}, want={}".format(seq_num, my_seq))
-        my_seq += 1
-
+        # get next message
+        pkt, port = srv.recv()
+        # some stats
+        port_num = port.get_port_num()
+        print(port_num, ": recv from", srv.get_peer_addr(), ":", pkt)
+        lost_pkts = srv.get_lost_pkts()
+        if lost_pkts:
+            print(port_num, ": lost packets:", lost_pkts)
         # echo reply
-        s.send(pkt, addr)
+        if pkt.is_sysex():
+            port.send_sysex(pkt.get_sysex())
+        else:
+            port.send_msg(pkt.get_msg())
