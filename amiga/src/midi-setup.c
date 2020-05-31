@@ -18,6 +18,13 @@ int midi_open(struct MidiSetup *ms)
     ms->rx_link = NULL;
     ms->tx_link = NULL;
 
+    /* sysex buf */
+    ms->sysex_buf = AllocVec(ms->sysex_max_size, 0);
+    if(ms->sysex_buf == NULL) {
+        PutStr("No memory for sysec buffer!\n");
+        return 6;
+    }
+
     CamdBase = OpenLibrary((UBYTE *)"camd.library", 0L);
     if(CamdBase == NULL) {
         PutStr("Error opening 'camd.library'!\n");
@@ -33,7 +40,7 @@ int midi_open(struct MidiSetup *ms)
 
     /* create midi node */
     ms->node = CreateMidi(MIDI_MsgQueue, 2048L,
-                MIDI_SysExSize, 10000L,
+                MIDI_SysExSize, ms->sysex_max_size,
                 MIDI_RecvSignal, ms->rx_sig,
                 MIDI_Name, "midi-echo",
                 TAG_END);
@@ -84,5 +91,8 @@ void midi_close(struct MidiSetup *ms)
     }
     if(CamdBase != NULL) {
         CloseLibrary(CamdBase);
+    }
+    if(ms->sysex_buf != NULL) {
+        FreeVec(ms->sysex_buf);
     }
 }

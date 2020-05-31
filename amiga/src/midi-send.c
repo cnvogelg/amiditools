@@ -16,10 +16,12 @@
 static const char *TEMPLATE = 
     "OUT/K,"
     "V/VERBOSE/S,"
+    "SMS/SYSEXMAXSIZE/K/N,"
     "CMDS/M";
 typedef struct {
     char *out_cluster;
     LONG *verbose;
+    ULONG *sysex_max_size;
     char **cmds;
 } params_t;
 
@@ -640,12 +642,13 @@ static char **run_cmd(char **cmd_ptr)
     return NULL;
 }
 
-static int run(char *cluster, char **cmds)
+static int run(char *cluster, char **cmds, ULONG sysex_max_size)
 {
     struct MidiSetup ms;
     MidiMsg msg;
 
     /* midi open */
+    ms.sysex_max_size = sysex_max_size;
     ms.tx_name = cluster;
     ms.rx_name = NULL;
     int res = midi_open(&ms);
@@ -710,7 +713,13 @@ int main(int argc, char **argv)
                     cluster = params.out_cluster;
                 }
 
-                result = run(cluster, cmds);
+                /* max size for sysex */
+                ULONG sysex_max_size = 2048;
+                if(params.sysex_max_size != NULL) {
+                    sysex_max_size = *params.sysex_max_size;
+                }
+
+                result = run(cluster, cmds, sysex_max_size);
             }
 
             FreeArgs(args);

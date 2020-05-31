@@ -4,11 +4,15 @@
 extern struct Library *CamdBase;
 
 struct MidiSetup {
+    /* input */
     char            *rx_name;
     char            *tx_name;
+    ULONG            sysex_max_size;
+    /* state */
     struct MidiNode *node;
     struct MidiLink *rx_link;
     struct MidiLink *tx_link;
+    UBYTE           *sysex_buf;
     BYTE             rx_sig;
 };
 
