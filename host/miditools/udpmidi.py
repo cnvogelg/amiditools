@@ -122,17 +122,19 @@ class MidiPacket:
 
 
 class UDPServer:
-    def __init__(self, host="localhost", port=6820, max_size=1024):
-        self.host = host
-        self.port = port
+    def __init__(self, host_addr=None, max_size=1024):
+        if not host_addr:
+            host_addr = ('localhost', 6820)
+        host_addr = (socket.gethostbyname(host_addr[0]), host_addr[1])
+        self.host_addr = host_addr
         self.max_size = max_size
         self.sock = socket.socket(family=socket.AF_INET, 
                                   type=socket.SOCK_DGRAM)
-        self.sock.bind((host, port))
+        self.sock.bind(host_addr)
 
     def __repr__(self):
-        return "UDPServer(host={}, port={}, max_size={})".format(
-            self.host, self.port, self.max_size
+        return "UDPServer(host_addr={}, max_size={})".format(
+            self.host_addr, self.max_size
         )
 
     def recv(self):
@@ -178,20 +180,22 @@ class MidiPort:
 
 
 class MidiServer:
-    def __init__(self, host="localhost", port=6820, max_size=1024,
+    def __init__(self, host_addr=None, max_size=1024,
                  max_ports=8, peer_addr=None):
         self.max_ports = max_ports
-        self.udp_srv = UDPServer(host, port, max_size)
+        self.udp_srv = UDPServer(host_addr, max_size)
         self.port_map = {}
         # state
         self.recv_seq_num = 0
         self.send_seq_num = 0
+        if peer_addr:
+            peer_addr = (socket.gethostbyname(peer_addr[0]), peer_addr[1])
         self.peer_addr = peer_addr
         self.lost_pkts = 0
 
     def __repr__(self):
-        return "MidiServer(udp_srv={}, max_ports={})".format(self.udp_srv,
-                                                             self.max_ports)
+        return "MidiServer(udp_srv={}, max_ports={}, peer_addr={})" \
+            .format(self.udp_srv, self.max_ports, self.peer_addr)
 
     def get_peer_addr(self):
         return self.peer_addr
@@ -248,8 +252,8 @@ class MidiServer:
         if self.peer_addr is None:
             self.peer_addr = addr
         elif self.peer_addr != addr:
-            raise InvalidClientError("On port {}: client is {} but was {}"
-                                     .format(self.port_num, addr,
+            raise InvalidClientError("Client is {} but was {}"
+                                     .format(addr,
                                              self.peer_addr))
 
     def recv(self):
@@ -265,6 +269,13 @@ class MidiServer:
     def send_msg(self, port_num, msg):
         pkt = MidiPacket(self.send_seq_num, port_num, msg)
         self.send(pkt)
+        return pkt
+
+    def send_raw_msg(self, port_num, raw_msg):
+        msg = MidiMsg(raw_msg)
+        pkt = MidiPacket(self.send_seq_num, port_num, msg)
+        self.send(pkt)
+        return pkt
 
     def send_sysex(self, port_num, sysex):
         # midi msg is first three bytes of sysex
@@ -272,6 +283,7 @@ class MidiServer:
         msg = MidiMsg(msg_raw)
         pkt = MidiPacket(self.send_seq_num, port_num, msg, sysex)
         self.send(pkt)
+        return pkt
 
     def close(self):
         self.udp_srv.close()
