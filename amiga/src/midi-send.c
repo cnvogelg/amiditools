@@ -10,11 +10,12 @@
 #include <utility/tagitem.h>
 
 #include "midi-setup.h"
+#include "midi-tools.h"
 
 #define DEFAULT_CLUSTER "mmp.out.0"
 
 static const char *TEMPLATE = 
-    "OUT/K,"
+    "DEV/K,"
     "V/VERBOSE/S,"
     "SMS/SYSEXMAXSIZE/K/N,"
     "CMDS/M";
@@ -42,9 +43,7 @@ static params_t params;
 static BOOL verbose;
 static struct MidiLink *tx;
 /* command state */
-static int hex_mode = 0;
 static int midi_channel = 0; /* 0..15 */
-static int octave_middle_c = 3;
 
 /* send midi */
 static void midi3(UBYTE status, UBYTE data1, UBYTE data2)
@@ -98,139 +97,6 @@ static void midi_nrpn(UWORD num, UWORD val)
 
 /* parsing */
 
-static int get_digit(char c)
-{
-    if((c >= '0') && (c <= '9')) {
-        return c - '0';
-    }
-    if((c >= 'A') && (c <= 'F')) {
-        return c - 'A' + 10;
-    }
-    if((c >= 'a') && (c <= 'f')) {
-        return c - 'a' + 10;
-    }
-    return -1;
-}
-
-/* parse a number */
-static LONG parse_number(char *str)
-{
-    int base = 10;
-
-    /* hex? */
-    if(str[0] == '$') {
-        base = 16;
-        str++;
-    } 
-    else if((str[0] == '0') && (str[1] == 'x')) {
-        base = 16;
-        str+=2;
-    }
-    /* dec? */
-    else if(str[0] == '!') {
-        str++;
-    }
-    else if((str[0] == '0') && (str[1] == 'd')) {
-        str+=2;
-    }
-    /* else use mode */
-    else if(hex_mode) {
-        base = 16;
-    }
-
-    /* parse decimal */
-    LONG result = 0;
-    while(*str != '\0') {
-        int digit = get_digit(*str);
-        if(digit == -1) {
-            return -1;
-        }
-        if(digit >= base) {
-            return -1;
-        }
-        result = result * base + digit;
-        str++;
-    }
-    return result;
-}
-
-static BYTE parse_number_7bit(char *str)
-{
-    LONG val = parse_number(str);
-    if((val < 0) || (val > 127)) {
-        return -1;
-    }
-    return (BYTE)val;
-}
-
-static WORD parse_number_14bit(char *str)
-{
-    LONG val = parse_number(str);
-    if((val < 0) || (val > 0x3fff)) {
-        return -1;
-    }
-    return (WORD)val;
-}
-
-static BYTE parse_note(char *str)
-{
-    /* is it a number? */
-    BYTE note = parse_number_7bit(str);
-    if(note != -1) {
-        return note;
-    }
-
-    /* note name? */
-    switch(*str) {
-        case 'c': case 'C': note = 0; break;
-        case 'd': case 'D': note = 2; break;
-        case 'e': case 'E': note = 4; break;
-        case 'f': case 'F': note = 5; break;
-        case 'g': case 'G': note = 7; break;
-        case 'a': case 'A': note = 9; break;
-        case 'b': case 'B': note = 11; break;
-        case 'h': case 'H': note = 11; break;
-        default:
-            Printf("Unknown note: %s\n", str);
-            return -1;
-    }
-    str++;
-    /* minor? */
-    if(*str == 'b') {
-        note -= 1;
-        str++;
-    }
-    /* major? */
-    else if(*str == '#') {
-        note += 1;
-        str++;
-    }
-
-    /* negative octave? */
-    LONG sign = 1;
-    if(*str == '-') {
-        sign = -1;
-        str++;
-    }
-
-    /* octave? */
-    LONG octave = 0;
-    if(*str != '\0') {
-        octave = parse_number(str);
-        if(octave == -1) {
-            Printf("Unknown octave: %s\n", str);
-            return -1;
-        }
-        octave *= sign;
-    }
-    /* map C-2 .. G8 to midi note */
-    LONG note_byte = (octave + octave_middle_c + 2) * 12 + note;
-    if((note_byte < 0) || (note_byte > 127)) {
-        Printf("invalid note: %ld\n", note_byte);
-        return -1;
-    }
-    return (BYTE)note_byte;
-}
 
 /* ---- commands ---- */
 
@@ -238,7 +104,7 @@ static BYTE parse_note(char *str)
 
 static int cmd_hex(int num_args, char **args)
 {
-    hex_mode = 1;
+    midi_tools_set_hex_mode(1);
     if(verbose)
         PutStr("hex\n");
     return 0;
@@ -246,7 +112,7 @@ static int cmd_hex(int num_args, char **args)
 
 static int cmd_dec(int num_args, char **args)
 {
-    hex_mode = 0;
+    midi_tools_set_hex_mode(0);
     if(verbose)
         PutStr("dec\n");
     return 0;
@@ -254,12 +120,12 @@ static int cmd_dec(int num_args, char **args)
 
 static int cmd_omc(int num_args, char **args)
 {
-    LONG omc = parse_number(args[0]);
+    LONG omc = midi_tools_parse_number(args[0]);
     if((omc < 0) || (omc > 8)) {
         Printf("Invalid octave: %ld\n", omc);
         return 1;
     }
-    octave_middle_c = omc;
+    midi_tools_set_octave_middle_c(omc);
     if(verbose)
         Printf("octave middle C: %ld\n", omc);
     return 0;
@@ -267,7 +133,7 @@ static int cmd_omc(int num_args, char **args)
 
 static int cmd_ch(int num_args, char **args)
 {
-    LONG ch = parse_number(args[0]);
+    LONG ch = midi_tools_parse_number(args[0]);
     if((ch < 1) || (ch > 16)) {
         Printf("Invalid MIDI channel: %ld\n", ch);
         return 1;
@@ -280,8 +146,8 @@ static int cmd_ch(int num_args, char **args)
 
 static int cmd_on(int num_args, char **args)
 {
-    BYTE note = parse_note(args[0]);
-    BYTE velocity = parse_number_7bit(args[1]);
+    BYTE note = midi_tools_parse_note(args[0]);
+    BYTE velocity = midi_tools_parse_number_7bit(args[1]);
     if((note == -1) || (velocity == -1)) {
         return 1;
     }
@@ -294,8 +160,8 @@ static int cmd_on(int num_args, char **args)
 
 static int cmd_off(int num_args, char **args)
 {
-    BYTE note = parse_note(args[0]);
-    BYTE velocity = parse_number_7bit(args[1]);
+    BYTE note = midi_tools_parse_note(args[0]);
+    BYTE velocity = midi_tools_parse_number_7bit(args[1]);
     if((note == -1) || (velocity == -1)) {
         return 1;
     }
@@ -308,8 +174,8 @@ static int cmd_off(int num_args, char **args)
 
 static int cmd_pp(int num_args, char **args)
 {
-    BYTE note = parse_note(args[0]);
-    BYTE aftertouch = parse_number_7bit(args[1]);
+    BYTE note = midi_tools_parse_note(args[0]);
+    BYTE aftertouch = midi_tools_parse_number_7bit(args[1]);
     if((note == -1) || (aftertouch == -1)) {
         return 1;
     }
@@ -322,8 +188,8 @@ static int cmd_pp(int num_args, char **args)
 
 static int cmd_cc(int num_args, char **args)
 {
-    BYTE ctl = parse_number_7bit(args[0]);
-    BYTE val = parse_number_7bit(args[1]);
+    BYTE ctl = midi_tools_parse_number_7bit(args[0]);
+    BYTE val = midi_tools_parse_number_7bit(args[1]);
     if((ctl == -1) || (val == -1)) {
         return 1;
     }
@@ -336,7 +202,7 @@ static int cmd_cc(int num_args, char **args)
 
 static int cmd_pc(int num_args, char **args)
 {
-    BYTE prg = parse_number_7bit(args[0]);
+    BYTE prg = midi_tools_parse_number_7bit(args[0]);
     if(prg == -1) {
         return 1;
     }
@@ -349,7 +215,7 @@ static int cmd_pc(int num_args, char **args)
 
 static int cmd_cp(int num_args, char **args)
 {
-    BYTE aftertouch = parse_number_7bit(args[0]);
+    BYTE aftertouch = midi_tools_parse_number_7bit(args[0]);
     if(aftertouch == -1) {
         return 1;
     }
@@ -362,7 +228,7 @@ static int cmd_cp(int num_args, char **args)
 
 static int cmd_pb(int num_args, char **args)
 {
-    WORD val = parse_number_14bit(args[0]);
+    WORD val = midi_tools_parse_number_14bit(args[0]);
     if(val == -1) {
         return 1;
     }
@@ -377,8 +243,8 @@ static int cmd_pb(int num_args, char **args)
 
 static int cmd_rpn(int num_args, char **args)
 {
-    WORD ctl = parse_number_14bit(args[0]);
-    WORD val = parse_number_14bit(args[1]);
+    WORD ctl = midi_tools_parse_number_14bit(args[0]);
+    WORD val = midi_tools_parse_number_14bit(args[1]);
     if((ctl == -1) || (val == -1)) {
         return 1;
     }
@@ -391,8 +257,8 @@ static int cmd_rpn(int num_args, char **args)
 
 static int cmd_nrpn(int num_args, char **args)
 {
-    WORD ctl = parse_number_14bit(args[0]);
-    WORD val = parse_number_14bit(args[1]);
+    WORD ctl = midi_tools_parse_number_14bit(args[0]);
+    WORD val = midi_tools_parse_number_14bit(args[1]);
     if((ctl == -1) || (val == -1)) {
         return 1;
     }
@@ -491,7 +357,7 @@ static int cmd_syx(int num_args, char **args)
     data[buf_len-1] = MS_EOX;
     UBYTE *ptr = data + 1;
     for(int i=0;i<num_args;i++) {
-        BYTE val = parse_number_7bit(args[i]);
+        BYTE val = midi_tools_parse_number_7bit(args[i]);
         if(val == -1) {
             FreeVec(data);
             return 2;
@@ -518,8 +384,8 @@ static int cmd_syx(int num_args, char **args)
 
 static int cmd_tc(int num_args, char **args)
 {
-    BYTE mt = parse_number_7bit(args[0]);
-    BYTE val = parse_number_7bit(args[1]);
+    BYTE mt = midi_tools_parse_number_7bit(args[0]);
+    BYTE val = midi_tools_parse_number_7bit(args[1]);
     if((mt == -1) || (val == -1)) {
         return 1;
     }
@@ -533,7 +399,7 @@ static int cmd_tc(int num_args, char **args)
 
 static int cmd_spp(int num_args, char **args)
 {
-    WORD val = parse_number_14bit(args[0]);
+    WORD val = midi_tools_parse_number_14bit(args[0]);
     if(val == -1) {
         return 1;
     }
@@ -548,7 +414,7 @@ static int cmd_spp(int num_args, char **args)
 
 static int cmd_ss(int num_args, char **args)
 {
-    BYTE val = parse_number_7bit(args[0]);
+    BYTE val = midi_tools_parse_number_7bit(args[0]);
     if(val == -1) {
         return 1;
     }
