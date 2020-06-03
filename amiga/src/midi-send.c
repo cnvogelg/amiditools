@@ -374,6 +374,55 @@ static int cmd_syx(int num_args, char **args)
     return 0;
 }
 
+static int cmd_syf(int num_args, char **args)
+{
+    BPTR fh = Open((STRPTR)*args, MODE_OLDFILE);
+    if(fh == NULL) {
+        Printf("Error opening sysex file: %s\n", *args);
+        return 1;
+    }
+
+    /* get size */
+    Seek(fh, 0, OFFSET_END);
+    LONG buf_len = Seek(fh, 0, OFFSET_BEGINNING);
+
+    UBYTE *data = AllocVec(buf_len, 0);
+    if(data == NULL) {
+        PutStr("Out of memory!\n");
+        Close(fh);
+        return 1;
+    }
+
+    int ret_code = 0;
+    LONG got_size = Read(fh, data, buf_len);
+    if(got_size == buf_len) {
+
+        /* check if its a sysex file */
+        if((data[0] == MS_SysEx) && (data[buf_len-1] == MS_EOX)) {
+            PutSysEx(tx, data);
+            if(verbose) {
+                PutStr("sys ex: ");
+                for(int i=0;i<buf_len;i++) {
+                    Printf("$%02lx ", data[i]);
+                }
+                PutStr("\n");
+            }
+        } else {
+            PutStr("No sysex file!\n");
+            ret_code = 2;
+        }
+
+    } else {
+        PrintFault(IoErr(), "ReadError");
+        ret_code = 3;
+    }
+
+    FreeVec(data);
+
+    Close(fh);
+    return ret_code;
+}
+
 static int cmd_tc(int num_args, char **args)
 {
     BYTE mt = midi_tools_parse_number_7bit(args[0]);
@@ -452,6 +501,7 @@ static cmd_t command_table[] = {
     { "rst", "reset", 0, cmd_rst },
     /* system common messages */
     { "syx", "system-exclusive", -1, cmd_syx },
+    { "syf", "system-exclusive-file", 1, cmd_syf },
     { "tc", "time-code", 2, cmd_tc },
     { "spp", "song-position", 1, cmd_spp },
     { "ss", "song-select", 1, cmd_ss },
