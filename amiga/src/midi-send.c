@@ -13,17 +13,13 @@
 #include "midi-tools.h"
 #include "cmd.h"
 
-#define DEFAULT_CLUSTER "mmp.out.0"
-
 static int handle_file(char *file_name);
 
 static const char *TEMPLATE = 
-    "DEV/K,"
     "V/VERBOSE/S,"
     "SMS/SYSEXMAXSIZE/K/N,"
     "CMDS/M";
 typedef struct {
-    char *out_cluster;
     LONG *verbose;
     ULONG *sysex_max_size;
     char **cmds;
@@ -39,6 +35,7 @@ struct UtilityBase *UtilityBase;
 static params_t params;
 static BOOL verbose;
 static struct MidiLink *tx;
+static struct MidiSetup midi_setup;
 /* command state */
 static int midi_channel = 0; /* 0..15 */
 static LONG last_timestamp = 0;
@@ -50,7 +47,11 @@ static void midi3(UBYTE status, UBYTE data1, UBYTE data2)
     mc.mm_Status = status;
     mc.mm_Data1 = data1;
     mc.mm_Data2 = data2;
-    PutMidi(tx, mc.cmd);
+    if(tx != NULL) {
+        PutMidi(tx, mc.cmd);
+    } else {
+        Printf("No device set!\n");
+    }
 }
 
 static void midi2(UBYTE status, UBYTE data1)
@@ -58,14 +59,31 @@ static void midi2(UBYTE status, UBYTE data1)
     MidiCmd mc;
     mc.mm_Status = status;
     mc.mm_Data1 = data1;
-    PutMidi(tx, mc.cmd);
+    if(tx != NULL) {
+        PutMidi(tx, mc.cmd);
+    } else {
+        Printf("No device set!\n");
+    }
 }
 
 static void midi1(UBYTE status)
 {
     MidiCmd mc;
     mc.mm_Status = status;
-    PutMidi(tx, mc.cmd);
+    if(tx != NULL) {
+        PutMidi(tx, mc.cmd);
+    } else {
+        Printf("No device set!\n");
+    }
+}
+
+static void midi_sysex(char *data)
+{
+    if(tx != NULL) {
+        PutSysEx(tx, data);
+    } else {
+        Printf("No device set!\n");
+    }
 }
 
 static void midi_cc(UBYTE ctl, UBYTE val)
@@ -370,7 +388,7 @@ static int cmd_syx(int num_args, char **args)
     }
 
     /* send sysex */
-    PutSysEx(tx, data);
+    midi_sysex(data);
 
     /* free buffer */
     FreeVec(data);
@@ -402,7 +420,7 @@ static int cmd_syf(int num_args, char **args)
 
         /* check if its a sysex file */
         if((data[0] == MS_SysEx) && (data[buf_len-1] == MS_EOX)) {
-            PutSysEx(tx, data);
+            midi_sysex(data);
             if(verbose) {
                 PutStr("sys ex: ");
                 for(int i=0;i<buf_len;i++) {
@@ -483,6 +501,30 @@ static int cmd_file(int num_args, char **args)
     return handle_file(*args);
 }
 
+static int cmd_dev(int num_args, char **args)
+{
+    /* close old? */
+    if(tx != NULL) {
+        if(verbose)
+            PutStr("closing midi device");
+        midi_close(&midi_setup);
+        tx = NULL;
+    }
+
+    /* midi open */
+    midi_setup.tx_name = *args;
+    if(verbose)
+        Printf("opening midi device: %s\n", *args);
+    int res = midi_open(&midi_setup);
+    if(res != 0) {
+        midi_close(&midi_setup);
+        Printf("Error opening midi device: %s\n", *args);
+        return res;
+    }
+    tx = midi_setup.tx_link;
+    return 0;
+}
+
 /* command table */
 static cmd_t command_table[] = {
     { "hex", "hexadecimal", 0, cmd_hex },
@@ -516,6 +558,7 @@ static cmd_t command_table[] = {
     { "tun", "tune-request", 0, cmd_tun },
     /* misc */
     { "file", NULL, 1, cmd_file },
+    { "dev", "device", 1, cmd_dev },
     { NULL, 0, NULL } /* terminator */
 };
 
@@ -592,26 +635,11 @@ static int handle_file(char *file_name)
     return cmd_exec_file(file_name, command_table, handle_other);
 }
 
-static int run(char *cluster, char **cmd_line, ULONG sysex_max_size)
+static int run(char **cmd_line, ULONG sysex_max_size)
 {
-    struct MidiSetup ms;
-    MidiMsg msg;
-
-    /* midi open */
-    ms.sysex_max_size = sysex_max_size;
-    ms.tx_name = cluster;
-    ms.rx_name = NULL;
-    int res = midi_open(&ms);
-    if(res != 0) {
-        midi_close(&ms);
-        return res;
-    }
-    tx = ms.tx_link;
-
-    /* main loop */
-    if(verbose) {
-        Printf("midi-send: to '%s'\n", cluster);
-    }
+    midi_setup.sysex_max_size = sysex_max_size;
+    midi_setup.rx_name = NULL;
+    tx = NULL;
 
     /* parse commands */
     int retcode = 0;
@@ -621,7 +649,10 @@ static int run(char *cluster, char **cmd_line, ULONG sysex_max_size)
         retcode = RETURN_ERROR;
     }
 
-    midi_close(&ms);
+    if(tx != NULL) {
+        midi_close(&midi_setup);
+    }
+
     return 0;
 }
 
@@ -654,19 +685,13 @@ int main(int argc, char **argv)
                     verbose = 1;
                 }
 
-                /* pick cluster */
-                char *cluster = DEFAULT_CLUSTER;
-                if(params.out_cluster != NULL) {
-                    cluster = params.out_cluster;
-                }
-
                 /* max size for sysex */
                 ULONG sysex_max_size = 2048;
                 if(params.sysex_max_size != NULL) {
                     sysex_max_size = *params.sysex_max_size;
                 }
 
-                result = run(cluster, cmds, sysex_max_size);
+                result = run(cmds, sysex_max_size);
             }
 
             FreeArgs(args);
