@@ -35,7 +35,7 @@ static void handle_sysex(struct MidiNode *node, UBYTE *buf, ULONG buf_size)
             ULONG got_size = GetSysEx(node, buf, buf_size);
             Printf("sysex(%ld): ", got_size);
             for(ULONG i=0;i<got_size;i++) {
-                Printf("%02x ", (ULONG)buf[i]);
+                Printf("%02lx ", (ULONG)buf[i]);
             }
             PutStr("\n");
         }
