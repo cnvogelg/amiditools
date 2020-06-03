@@ -15,6 +15,8 @@
 
 #define DEFAULT_CLUSTER "mmp.out.0"
 
+static int handle_file(char *file_name);
+
 static const char *TEMPLATE = 
     "DEV/K,"
     "V/VERBOSE/S,"
@@ -476,6 +478,11 @@ static int cmd_tun(int num_args, char **args)
     return 0;
 }
 
+static int cmd_file(int num_args, char **args)
+{
+    return handle_file(*args);
+}
+
 /* command table */
 static cmd_t command_table[] = {
     { "hex", "hexadecimal", 0, cmd_hex },
@@ -507,6 +514,8 @@ static cmd_t command_table[] = {
     { "spp", "song-position", 1, cmd_spp },
     { "ss", "song-select", 1, cmd_ss },
     { "tun", "tune-request", 0, cmd_tun },
+    /* misc */
+    { "file", NULL, 1, cmd_file },
     { NULL, 0, NULL } /* terminator */
 };
 
@@ -523,7 +532,7 @@ static int handle_timestamp(char *arg)
     // parse time stamp
     LONG millis = midi_tools_parse_timestamp(arg);
     if(millis == -1) {
-        return 0;
+        return 1;
     }
 
     // relative
@@ -549,7 +558,38 @@ static int handle_timestamp(char *arg)
         last_timestamp = millis;
     }
 
-    return 1;
+    return 0;
+}
+
+static char **handle_other(char **args)
+{
+    // try a time stamp
+    if(handle_timestamp(*args)==0) {
+        return args+1;
+    } 
+    else if(handle_file(*args)==0) {
+        return args+1;
+    }
+    else {
+        return NULL;
+    }
+}
+
+static int handle_file(char *file_name)
+{
+    // does file exist?
+    BPTR lock = Lock(file_name, ACCESS_READ);
+    if(lock == NULL) {
+        Printf("File not found: %s\n", file_name);
+        return 1;
+    }
+    UnLock(lock);
+
+    if(verbose) {
+        Printf("Executing commands from: %s\n", file_name);
+    }
+
+    return cmd_exec_file(file_name, command_table, handle_other);
 }
 
 static int run(char *cluster, char **cmd_line, ULONG sysex_max_size)
@@ -575,21 +615,10 @@ static int run(char *cluster, char **cmd_line, ULONG sysex_max_size)
 
     /* parse commands */
     int retcode = 0;
-    while(1) {
-        char **result = cmd_exec_cmd_line(cmd_line, command_table);
-        if(result != NULL) {
-            // try a time stamp
-            if(handle_timestamp(*result)) {
-                // skip time stamp and continue
-                cmd_line = result + 1;
-            } else {
-                Printf("Failed parsing cmd: %s\n", *result);
-                retcode = RETURN_ERROR;
-                break;
-            }
-        } else {
-            break;
-        }
+    char **result = cmd_exec_cmd_line(cmd_line, command_table, handle_other);
+    if(result != NULL) {
+        Printf("Failed parsing cmd: %s\n", *result);
+        retcode = RETURN_ERROR;
     }
 
     midi_close(&ms);
