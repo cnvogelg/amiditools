@@ -84,7 +84,7 @@ MIDI_ECHO_SRCS=midi-echo.c midi-setup.c
 $(eval $(call build-app,midi-echo,$(MIDI_ECHO_SRCS)))
 
 # midi-send
-MIDI_SEND_SRCS=midi-send.c midi-tools.c midi-setup.c
+MIDI_SEND_SRCS=midi-send.c midi-tools.c midi-setup.c cmd.c
 $(eval $(call build-app,midi-send,$(MIDI_SEND_SRCS)))
 
 # midi-recv

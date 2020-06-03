@@ -11,6 +11,7 @@
 
 #include "midi-setup.h"
 #include "midi-tools.h"
+#include "cmd.h"
 
 #define DEFAULT_CLUSTER "mmp.out.0"
 
@@ -25,12 +26,6 @@ typedef struct {
     ULONG *sysex_max_size;
     char **cmds;
 } params_t;
-
-typedef struct {
-    char *name;
-    int   num_args;
-    int   (*run_cmd)(int num_args, char **args);
-} cmd_t;
 
 typedef union {
     LONG  cmd;
@@ -94,9 +89,6 @@ static void midi_nrpn(UWORD num, UWORD val)
     midi_cc(101, 0x7f);
     midi_cc(100, 0x7f);
 }
-
-/* parsing */
-
 
 /* ---- commands ---- */
 
@@ -435,7 +427,7 @@ static int cmd_tun(int num_args, char **args)
 }
 
 /* command table */
-static cmd_t commands[] = {
+static cmd_t command_table[] = {
     { "hex", 0, cmd_hex },
     { "dec", 0, cmd_dec },
     { "omc", 1, cmd_omc },
@@ -467,48 +459,7 @@ static cmd_t commands[] = {
     { NULL, 0, NULL } /* terminator */
 };
 
-static char **run_cmd(char **cmd_ptr)
-{
-    /* search command */
-    char *cmd_name = cmd_ptr[0];
-    cmd_ptr++;
-    cmd_t *cmd = commands;
-    while(cmd->name != NULL) {
-        if(Stricmp(cmd->name, cmd_name)==0) {
-            int num_args = cmd->num_args;
-            char **args = cmd_ptr;
-            /* skip args */
-            if(num_args > 0) {
-                for(int i=0;i<num_args;i++) {
-                    /* command too short? */
-                    if(*cmd_ptr == NULL) {
-                        return NULL;
-                    }
-                    cmd_ptr++;
-                }
-            } 
-            /* munge all args */
-            else if(num_args < 0) {
-                num_args = 0;
-                while(*cmd_ptr != NULL) {
-                    cmd_ptr++;
-                    num_args++;
-                }
-            }
-            /* run command */
-            int result = cmd->run_cmd(num_args, args);
-            if(result != 0) {
-                return NULL;
-            }
-            return cmd_ptr;
-        }
-        cmd++;
-    }
-    /* command not found! */
-    return NULL;
-}
-
-static int run(char *cluster, char **cmds, ULONG sysex_max_size)
+static int run(char *cluster, char **cmd_line, ULONG sysex_max_size)
 {
     struct MidiSetup ms;
     MidiMsg msg;
@@ -530,14 +481,11 @@ static int run(char *cluster, char **cmds, ULONG sysex_max_size)
     }
 
     /* parse commands */
-    char **cmd = cmds;
-    while(*cmd != NULL) {
-        char **result = run_cmd(cmd);
-        if(result == NULL) {
-            Printf("ERROR: parsing command: '%s'!\n", *cmd);
-            break;
-        }
-        cmd = result;
+    int retcode = 0;
+    char *result = cmd_exec_cmd_line(cmd_line, command_table);
+    if(result != NULL) {
+        Printf("Failed parsing cmd: %s\n", result);
+        return retcode = RETURN_ERROR;
     }
 
     midi_close(&ms);
