@@ -8,6 +8,6 @@ typedef struct {
     int   (*run_cmd)(int num_args, char **args);
 } cmd_t;
 
-extern char *cmd_exec_cmd_line(char **args, cmd_t *cmd_table);
+extern char **cmd_exec_cmd_line(char **args, cmd_t *cmd_table);
 
 #endif

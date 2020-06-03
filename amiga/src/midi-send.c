@@ -39,6 +39,7 @@ static BOOL verbose;
 static struct MidiLink *tx;
 /* command state */
 static int midi_channel = 0; /* 0..15 */
+static LONG last_timestamp = 0;
 
 /* send midi */
 static void midi3(UBYTE status, UBYTE data1, UBYTE data2)
@@ -509,6 +510,48 @@ static cmd_t command_table[] = {
     { NULL, 0, NULL } /* terminator */
 };
 
+static int handle_timestamp(char *arg)
+{
+    int rel = 0;
+
+    // relative time stamp
+    if(*arg == '+') {
+        rel = 1;
+        arg++;
+    }
+
+    // parse time stamp
+    LONG millis = midi_tools_parse_timestamp(arg);
+    if(millis == -1) {
+        return 0;
+    }
+
+    // relative
+    if(rel) {
+        LONG ticks = millis / 20; // 50 Hz
+        if(verbose) {
+            Printf("waiting ticks: %ld\n", ticks);
+        }
+        Delay(ticks);
+        last_timestamp += millis;
+    }
+    // absolute
+    else {
+        // calc delta to last time stamp
+        if(last_timestamp > 0) {
+            LONG delta = millis - last_timestamp;
+            LONG ticks = delta / 20;
+            if(verbose) {
+                Printf("waiting ticks: %ld\n", ticks);
+            }
+            Delay(ticks);
+        }
+        last_timestamp = millis;
+    }
+
+    return 1;
+}
+
 static int run(char *cluster, char **cmd_line, ULONG sysex_max_size)
 {
     struct MidiSetup ms;
@@ -532,10 +575,21 @@ static int run(char *cluster, char **cmd_line, ULONG sysex_max_size)
 
     /* parse commands */
     int retcode = 0;
-    char *result = cmd_exec_cmd_line(cmd_line, command_table);
-    if(result != NULL) {
-        Printf("Failed parsing cmd: %s\n", result);
-        return retcode = RETURN_ERROR;
+    while(1) {
+        char **result = cmd_exec_cmd_line(cmd_line, command_table);
+        if(result != NULL) {
+            // try a time stamp
+            if(handle_timestamp(*result)) {
+                // skip time stamp and continue
+                cmd_line = result + 1;
+            } else {
+                Printf("Failed parsing cmd: %s\n", *result);
+                retcode = RETURN_ERROR;
+                break;
+            }
+        } else {
+            break;
+        }
     }
 
     midi_close(&ms);

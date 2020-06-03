@@ -1,4 +1,5 @@
 #include <exec/types.h>
+
 #include "midi-tools.h"
 
 static int hex_mode = 0;
@@ -28,8 +29,13 @@ void midi_tools_set_octave_middle_c(int oct)
     octave_middle_c = oct;
 }
 
-/* parse a number */
 LONG midi_tools_parse_number(char *str)
+{
+    return midi_tools_parse_number_n(str, 255);
+}
+
+/* parse a number */
+LONG midi_tools_parse_number_n(char *str, int max)
 {
     int base = 10;
 
@@ -56,7 +62,8 @@ LONG midi_tools_parse_number(char *str)
 
     /* parse decimal */
     LONG result = 0;
-    while(*str != '\0') {
+    int len = 0;
+    while((*str != '\0') && (len<max)) {
         int digit = get_digit(*str);
         if(digit == -1) {
             return -1;
@@ -66,6 +73,7 @@ LONG midi_tools_parse_number(char *str)
         }
         result = result * base + digit;
         str++;
+        len++;
     }
     return result;
 }
@@ -143,4 +151,33 @@ BYTE midi_tools_parse_note(char *str)
         return -1;
     }
     return (BYTE)note_byte;
+}
+
+LONG midi_tools_parse_timestamp(char *str)
+{
+    // format: hh:mm:ss.iii
+    //         012345678901
+    if(str[2] == ':' && str[5] == ':' && str[8] == '.' && str[12] == '\x0') {
+        LONG hours = midi_tools_parse_number_n(str, 2);
+        LONG mins = midi_tools_parse_number_n(str+3, 2);
+        LONG secs = midi_tools_parse_number_n(str+6, 2);
+        LONG millis = midi_tools_parse_number(str+9);
+        if((hours == -1) || (mins == -1) || (secs == -1) || (millis == -1)) {
+            return -1;
+        }
+        return ((hours * 60 + mins) * 60 + secs) * 1000 + millis;
+    }
+    // format: ss.iii
+    //         012345
+    else if(str[2] == '.' && str[6] == '\x0') {
+        LONG secs = midi_tools_parse_number_n(str, 2);
+        LONG millis = midi_tools_parse_number(str+3);
+        if((secs == -1) || (millis == -1)) {
+            return -1;
+        }
+        return secs * 1000 + millis;
+    }
+    else {
+        return -1;
+    }
 }

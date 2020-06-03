@@ -48,7 +48,7 @@ static char **run_cmd(char **cmd_ptr, cmd_t *cmd_table)
     return NULL;
 }
 
-char *cmd_exec_cmd_line(char **args, cmd_t *cmd_table)
+char **cmd_exec_cmd_line(char **args, cmd_t *cmd_table)
 {
     if(args == NULL) {
         return NULL;
@@ -57,7 +57,7 @@ char *cmd_exec_cmd_line(char **args, cmd_t *cmd_table)
     while(*args != NULL) {
         char **result = run_cmd(args, cmd_table);
         if(result == NULL) {
-            return *args;
+            return args;
         }
         args = result;
     }
