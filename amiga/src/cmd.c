@@ -10,7 +10,11 @@ static char **run_cmd(char **cmd_ptr, cmd_t *cmd_table)
     cmd_ptr++;
     cmd_t *cmd = cmd_table;
     while(cmd->name != NULL) {
-        if(Stricmp(cmd->name, cmd_name)==0) {
+        int match = Stricmp(cmd->name, cmd_name) == 0;
+        if(!match && (cmd->long_name != NULL)) {
+            match = Stricmp(cmd->long_name, cmd_name) == 0;
+        }
+        if(match) { 
             int num_args = cmd->num_args;
             char **args = cmd_ptr;
             /* skip args */

@@ -3,6 +3,7 @@
 
 typedef struct {
     char *name;
+    char *long_name;
     int   num_args;
     int   (*run_cmd)(int num_args, char **args);
 } cmd_t;
