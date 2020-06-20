@@ -32,9 +32,51 @@ static struct MidiSetup midi_setup;
 static struct MidiLink *rx;
 /* command state */
 static int midi_channel = 0; /* 0..15 */
+static int note_numbers = 0;
 static LONG last_timestamp = 0;
 
+/* output tools */
+
+static void print_7bit(UBYTE val)
+{
+    if(midi_tools_get_hex_mode()) {
+        Printf("%02lx", val);
+    } else {
+        Printf("%3ld", val);
+    }
+}
+
+static void print_14bit(UBYTE lsb, UBYTE msb)
+{
+    UWORD val = msb << 7 | lsb;
+    if(midi_tools_get_hex_mode()) {
+        Printf("%04lx", val);
+    } else {
+        Printf("%5ld", val);
+    }
+}
+
+static void print_note(UBYTE note)
+{
+    if(note_numbers) {
+        print_7bit(note);
+    } else {
+        char buf[16];
+        midi_tools_print_note(buf, note, 1, 1);
+        PutStr(buf);
+    }
+}
+
+static void print_channel(UBYTE chn)
+{
+    PutStr("channel ");
+    print_7bit(chn+1);
+    PutStr(" ");
+}
+
 /* input handler */
+
+/* system common */
 
 static void handle_sysex(void)
 {
@@ -43,28 +85,135 @@ static void handle_sysex(void)
     ULONG  buf_size = midi_setup.sysex_max_size;
 
     if(buf == NULL) {
-        PutStr("sysex: SKIP: no buffer!\n");
+        PutStr("sysex: ERROR: no buffer!\n");
         SkipSysEx(node);
     } else {
         ULONG size = QuerySysEx(node);
         if(size > buf_size) {
-            Printf("sysex: SKIP: too large: %ld!\n", size);
+            Printf("sysex: ERROR: too large: %ld!\n", size);
             SkipSysEx(node);
         } else {
             ULONG got_size = GetSysEx(node, buf, buf_size);
-            Printf("sysex(%ld): ", got_size);
-            for(ULONG i=0;i<got_size;i++) {
+            int hex = midi_tools_get_hex_mode();
+            if(!hex) {
+                PutStr("hex ");
+            }
+            PutStr("syx ");
+            for(ULONG i=1;i<(got_size-1);i++) {
                 Printf("%02lx ", (ULONG)buf[i]);
+            }
+            if(!hex) {
+                PutStr("\ndec");
             }
             PutStr("\n");
         }
     }
 }
 
+static void handle_qtr_frame(UBYTE data)
+{
+    UBYTE seq_num = data >> 4;
+    UBYTE value   = data & 0x0f;
+    PutStr("time-code ");
+    print_7bit(seq_num);
+    PutStr(" ");
+    print_7bit(value);
+    PutStr("\n");
+}
+
+static void handle_song_pos(UBYTE lsb, UBYTE msb)
+{
+    PutStr("song-position ");
+    print_14bit(lsb, msb);
+    PutStr("\n");
+}
+
+static void handle_song_select(UBYTE sn)
+{
+    PutStr("song-select ");
+    print_7bit(sn);
+    PutStr("\n");
+}
+
+static void handle_tune_req(void)
+{
+    PutStr("tune-request\n");
+}
+
+/* system realtime */
+
+static void handle_clock(void)
+{
+    PutStr("midi-clock\n");
+}
+
+static void handle_start(void)
+{
+    PutStr("start\n");
+}
+
+static void handle_cont(void)
+{
+    PutStr("continue\n");
+}
+
+static void handle_stop(void)
+{
+    PutStr("stop\n");
+}
+
+static void handle_act_sense(void)
+{
+    PutStr("active-sensing\n");
+}
+
+static void handle_reset(void)
+{
+    PutStr("reset\n");
+}
+
 static void handle_system_msg(UBYTE status, UBYTE data1, UBYTE data2)
 { 
-    if(status == MS_SysEx) {
-        handle_sysex();
+    switch(status) {
+        // System Common
+        case MS_SysEx:
+            handle_sysex();
+            break;
+        case MS_QtrFrame:
+            handle_qtr_frame(data1);
+            break;
+        case MS_SongPos:
+            handle_song_pos(data1, data2);
+            break;
+        case MS_SongSelect:
+            handle_song_select(data1);
+            break;
+        case MS_TuneReq:
+            handle_tune_req();
+            break;
+        // System Realtime
+        case MS_Clock:
+            handle_clock();
+            break;
+        case MS_Start:
+            handle_start();
+            break;
+        case MS_Continue:
+            handle_cont();
+            break;
+        case MS_Stop:
+            handle_stop();
+            break;
+        case MS_ActvSense:
+            handle_act_sense();
+            break;
+        case MS_Reset:
+            handle_reset();
+            break;
+
+        default:
+            Printf("Invalid System Msg: %02lx\n", status);
+            break;
     }
 }
 
@@ -72,37 +221,66 @@ static void handle_system_msg(UBYTE status, UBYTE data1, UBYTE data2)
 
 static void handle_note_on(UBYTE chn, UBYTE note, UBYTE vel)
 {
-    Printf("channel  %2ld  note-on          %ld  %ld\n", chn+1, note, vel);
+    print_channel(chn);
+    PutStr("note-on          ");
+    print_note(note);
+    PutStr(" ");
+    print_7bit(vel);
+    PutStr("\n");
 }
 
 static void handle_note_off(UBYTE chn, UBYTE note, UBYTE vel)
 {
-    Printf("channel  %2ld  note-off         %ld  %ld\n", chn+1, note, vel);
+    print_channel(chn);
+    PutStr("note-off         ");
+    print_note(note);
+    PutStr(" ");
+    print_7bit(vel);
+    PutStr("\n");
 }
 
 static void handle_poly_pressure(UBYTE chn, UBYTE note, UBYTE vel)
 {
-    Printf("channel  %2ld  poly-pressure    %ld  %ld\n", chn+1, note, vel);
+    print_channel(chn);
+    PutStr("poly-pressure    ");
+    print_note(note);
+    PutStr(" ");
+    print_7bit(vel);
+    PutStr("\n");
 }
 
 static void handle_control_change(UBYTE chn, UBYTE ctrl, UBYTE val)
 {
-    Printf("channel  %2ld  control-change   %ld  %ld\n", chn+1, ctrl, val);
+    print_channel(chn);
+    PutStr("control-change   ");
+    print_7bit(ctrl);
+    PutStr(" ");
+    print_7bit(val);
+    PutStr("\n");
 }
 
 static void handle_program_change(UBYTE chn, UBYTE prog)
 {
-    Printf("channel  %2ld  program-change   %ld\n", chn+1, prog);
+    print_channel(chn);
+    PutStr("program-change   ");
+    print_7bit(prog);
+    PutStr("\n");
 }
 
-static void handle_channel_pressure(UBYTE chn, UBYTE prog)
+static void handle_channel_pressure(UBYTE chn, UBYTE val)
 {
-    Printf("channel  %2ld  channel-pressure %ld\n", chn+1, prog);
+    print_channel(chn);
+    PutStr("channel-pressure ");
+    print_7bit(val);
+    PutStr("\n");
 }
 
-static void handle_pitch_bend(UBYTE chn, UBYTE least, UBYTE most)
+static void handle_pitch_bend(UBYTE chn, UBYTE lsb, UBYTE msb)
 {
-    Printf("channel  %2ld  channel-pressure %ld  %ld\n", chn+1, least, most);
+    print_channel(chn);
+    Printf("pitch-bend       ");
+    print_14bit(lsb, msb);
+    PutStr("\n");
 }
 
 /* handle midi message */
@@ -163,6 +341,14 @@ static void handle_msg(UBYTE status, UBYTE data1, UBYTE data2)
 }
 
 /* --- commands --- */
+
+static int cmd_nn(int num_args, char **args)
+{
+    note_numbers = 1;
+    if(verbose)
+        PutStr("note-numbers\n");
+    return 0;
+}
 
 static int cmd_hex(int num_args, char **args)
 {
@@ -239,6 +425,7 @@ static int cmd_dev(int num_args, char **args)
 
 /* command table */
 static cmd_t command_table[] = {
+    { "nn", "note-numbers", 0, cmd_nn },
     { "hex", "hexadecimal", 0, cmd_hex },
     { "dec", "decimal", 0, cmd_dec },
     { "omc", "octave-middle-c", 1, cmd_omc },

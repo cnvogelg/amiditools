@@ -120,6 +120,7 @@ DIST_FILES=$(patsubst $(BIN_DIR)/%,$(DIST_DIR)/%,$(TOOLS))
 INSTALL_FILES=$(patsubst $(BIN_DIR)/%,$(INSTALL_DIR)/%,$(TOOLS))
 
 install: init $(INSTALL_FILES)
+	cp -f midi-test $(INSTALL_DIR)/
 
 clean:
 	rm -rf $(BIN_DIR) $(DIST_DIR)

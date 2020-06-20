@@ -24,6 +24,11 @@ void midi_tools_set_hex_mode(int on)
     hex_mode = on;
 }
 
+int midi_tools_get_hex_mode(void)
+{
+    return hex_mode;
+}
+
 void midi_tools_set_octave_middle_c(int oct)
 {
     octave_middle_c = oct;
@@ -181,3 +186,48 @@ LONG midi_tools_parse_timestamp(char *str)
         return -1;
     }
 }
+
+static char *sharp_notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+static char *flat_notes[] =  { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
+
+void midi_tools_print_note(char *buf, UBYTE note, int use_sharps, int add_octave)
+{
+    int rel_note = note % 12;
+    int octave = (int)(note / 12);
+    char *ptr = buf;
+    char *note_str;
+
+    if(use_sharps) {
+        note_str = sharp_notes[rel_note];
+    } else {
+        note_str = flat_notes[rel_note];
+    }
+
+    /* copy note */
+    int len = 0;
+    while(*note_str) {
+        *ptr++ = *note_str++;
+        len++;
+    }
+
+    if(add_octave) {
+        octave = octave + octave_middle_c - 5;
+        if(octave < 0) {
+            *ptr++ = '-';
+            octave = -octave;
+        }
+        if(octave >= 10) {
+            int o = octave / 10;
+            *ptr++ = '0' + o;
+            octave -= 10;
+        }
+        *ptr++ = '0' + octave;
+    }
+
+    if(len==1) {
+        *ptr++ = ' ';
+    }
+
+    *ptr = '\0';
+}
+

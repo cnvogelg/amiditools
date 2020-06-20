@@ -71,46 +71,61 @@ char **cmd_exec_cmd_line(char **args, cmd_t *cmd_table, handle_other_func_t func
     return NULL;
 }
 
-static char **find_commands(char *buf, int arg_size)
+static int find_args_in_line(char **buf, char **args_buf, int max_args)
 {
-    char **args = (char **)AllocVec(arg_size, 0);
-    if(args == NULL) {
-        PutStr("Out of memory!\n");
-        return NULL;
-    }
-    char **args_ptr = args;
-    char *buf_ptr = buf;
-    int args_left = arg_size;
+    char **args_ptr = args_buf;
+    char *buf_ptr = *buf;
+    int args_left = max_args;
+    int num_args = 0;
 
     while(1) {
         /* skip white spaces */
-        while((*buf_ptr == ' ') || (*buf_ptr == '\t') || (*buf_ptr == '\n'))
+        while((*buf_ptr == ' ') || (*buf_ptr == '\t') || (*buf_ptr == '\r'))
             buf_ptr++;
-        if(*buf_ptr == '\0') 
+        /* eof */
+        if(*buf_ptr == '\x0') {
+            *buf = NULL;
             break;
+        }
+        /* end of line */
+        if(*buf_ptr == 0x0a) {
+            buf_ptr++;
+            *buf = buf_ptr;
+            break;
+        }
         /* new arg begins */
         if(args_left == 1) {
-            // TODO: grow buffer
-            PutStr("too many commands\n");
-            break;
+            PutStr("too many args\n");
+            return -1;
         }
         /* store arg */
         *args_ptr = buf_ptr;
         args_ptr++;
         args_left--;
+        num_args++;
         /* skip arg */
         while((*buf_ptr != ' ') && (*buf_ptr != '\t') && (*buf_ptr != '\n')
             && (*buf_ptr != '\x0'))
             buf_ptr++;
-        if(*buf_ptr == '\x0')
+        /* eof */
+        if(*buf_ptr == '\x0') {
+            *buf = NULL;
             break;
-        /* terminate arg with zero byte */
+        }
+        /* eol */
+        if(*buf_ptr == '\n') {
+            *buf_ptr = '\x0';
+            buf_ptr++;
+            *buf = buf_ptr;
+            break;
+        }
+        /* terminate arg */
         *buf_ptr = '\x0';
         buf_ptr++;
     }
     /* end marker in args */
     *args_ptr = NULL;
-    return args;
+    return num_args;
 }
 
 int cmd_exec_file(char *file_name, cmd_t *cmd_table, handle_other_func_t func)
@@ -125,6 +140,7 @@ int cmd_exec_file(char *file_name, cmd_t *cmd_table, handle_other_func_t func)
     Seek(fh, 0, OFFSET_END);
     LONG buf_len = Seek(fh, 0, OFFSET_BEGINNING);
 
+    /* alloc file buffer */
     UBYTE *data = AllocVec(buf_len + 1, 0);
     if(data == NULL) {
         PutStr("Out of memory!\n");
@@ -132,29 +148,46 @@ int cmd_exec_file(char *file_name, cmd_t *cmd_table, handle_other_func_t func)
         return 2;
     }
 
+    /* alloc arg buffer */
+    const int max_args = 256;
+    char **args_buf = (char **)AllocVec(max_args * sizeof(char *), 0);
+    if(args_buf == NULL) {
+        PutStr("Out of memory!\n");
+        Close(fh);
+        return 3;
+    }
+
+    /* read file */
     int ret_code = 0;
     LONG got_size = Read(fh, data, buf_len);
+    
+    /* parse loop */
     if(got_size == buf_len) {
         data[buf_len] = '\0';
 
-        char **args = find_commands(data, 1024);
-        if(args != NULL) {
-            char **result = cmd_exec_cmd_line(args, cmd_table, func);
-            if(result != NULL) {
-                Printf("Error parsing in file '%s': cmd=%s\n", file_name, *result);
-                return 3;
+        char *ptr = data;
+        while(ptr != NULL) {
+            int num_args = find_args_in_line(&ptr, args_buf, max_args);
+            if(num_args > 0) {
+                char **result = cmd_exec_cmd_line(args_buf, cmd_table, func);
+                if(result != NULL) {
+                    Printf("Error parsing in file '%s': cmd=%s\n", file_name, *result);
+                    return 3;
+                }
+            } else if(num_args < 0) {
+                Printf("Error finding commands!\n");
+                ret_code = 5;
+                break;
             }
-            FreeVec(args);
-        } else {
-            Printf("Error finding commands!\n");
         }
 
     } else {
         PrintFault(IoErr(), "ReadError");
-        ret_code = 3;
+        ret_code = 4;
     }
 
     FreeVec(data);
+    FreeVec(args_buf);
 
     Close(fh);
     return ret_code;
