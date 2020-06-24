@@ -1,4 +1,9 @@
 #include <exec/types.h>
+#include <proto/timer.h>
+#include <proto/exec.h>
+#include <proto/alib.h>
+#include <proto/dos.h>
+#include <devices/timer.h>
 
 #include "midi-tools.h"
 
@@ -231,3 +236,79 @@ void midi_tools_print_note(char *buf, UBYTE note, int use_sharps, int add_octave
     *ptr = '\0';
 }
 
+/* ----- time stuff ----- */
+
+struct Device *TimerBase;
+static struct IORequest *ior_time;
+static struct timeval start_time;
+
+int midi_tools_init_time(void)
+{
+    struct MsgPort *port;
+    LONG error;
+
+    port = CreatePort(NULL, 0);
+    if(port == NULL) {
+        return 1;
+    }
+
+    ior_time = (struct IORequest *)CreateExtIO(port, sizeof(struct IORequest));
+    if(ior_time == NULL) {
+        DeletePort(port);
+        return 2;
+    }
+
+    error = OpenDevice(TIMERNAME, UNIT_MICROHZ, ior_time, 0L);
+    if(error != 0) {
+        DeleteExtIO(ior_time);
+        DeletePort(port);
+        return 3;
+
+    }
+
+    TimerBase = ior_time->io_Device;
+
+    GetSysTime(&start_time);
+
+    return 0;
+}
+
+void midi_tools_exit_time(void)
+{
+    struct MsgPort *port;
+
+    if(ior_time == NULL) {
+        return;
+    }
+
+    port = ior_time->io_Message.mn_ReplyPort;
+
+    CloseDevice(ior_time);
+    DeleteExtIO(ior_time);
+    DeletePort(port);
+
+    TimerBase = NULL;
+}
+
+void midi_tools_get_time(struct timeval *tv)
+{
+    if((TimerBase == NULL) || (tv == NULL)) {
+        return;
+    }
+
+    GetSysTime(tv);
+    SubTime(tv, &start_time);
+}
+
+void midi_tools_print_time(struct timeval *tv)
+{
+    ULONG secs = tv->tv_secs;
+    ULONG mins = secs / 60;
+    secs -= mins * 60;
+    ULONG hours = mins / 60;
+    mins -= hours * 60;
+
+    ULONG us = tv->tv_micro;
+    ULONG ms = us / 1000;
+    Printf("%02ld:%02ld:%02ld.%03ld", hours, mins, secs, ms);
+}

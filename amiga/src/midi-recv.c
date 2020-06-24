@@ -33,7 +33,7 @@ static struct MidiLink *rx;
 /* command state */
 static int midi_channel = 0; /* 0..15 */
 static int note_numbers = 0;
-static LONG last_timestamp = 0;
+static int show_timestamp = 0;
 
 /* output tools */
 
@@ -294,6 +294,14 @@ static void handle_msg(UBYTE status, UBYTE data1, UBYTE data2)
 {
     UBYTE grp = status & MS_StatBits;
     UBYTE chn = status & MS_ChanBits;
+
+    if(show_timestamp) {
+        struct timeval tv;
+        midi_tools_get_time(&tv);
+        midi_tools_print_time(&tv);
+        PutStr("  ");
+    }
+
     switch(grp) {
         /* channel voice messages */
         case MS_NoteOff: /* NoteOff */
@@ -341,6 +349,14 @@ static void handle_msg(UBYTE status, UBYTE data1, UBYTE data2)
 }
 
 /* --- commands --- */
+
+static int cmd_ts(int num_args, char **args)
+{
+    show_timestamp = 1;
+    if(verbose)
+        PutStr("timestamp\n");
+    return 0;
+}
 
 static int cmd_nn(int num_args, char **args)
 {
@@ -425,6 +441,7 @@ static int cmd_dev(int num_args, char **args)
 
 /* command table */
 static cmd_t command_table[] = {
+    { "ts", "timestamp", 0, cmd_ts },
     { "nn", "note-numbers", 0, cmd_nn },
     { "hex", "hexadecimal", 0, cmd_hex },
     { "dec", "decimal", 0, cmd_dec },
@@ -490,17 +507,24 @@ static int run(char **cmd_line, ULONG sysex_max_size)
     if(verbose)
         Printf("midi-recv: from '%s'\n", midi_setup.rx_name);
 
-    /* main loop */
-    struct MidiNode *node = midi_setup.node;
-    while(alive) {
-        sigmask = Wait(SIGBREAKF_CTRL_C | 1L<<midi_setup.rx_sig);
-        if(sigmask & SIGBREAKF_CTRL_C)
-            alive=FALSE;
-        while(GetMidi(midi_setup.node, &msg)) {
-            if(verbose)
-                Printf("%08ld: %08lx\n", msg.mm_Time, msg.mm_Msg);
-            handle_msg(msg.mm_Status, msg.mm_Data1, msg.mm_Data2);
+    int rc = midi_tools_init_time();
+    if(rc!=0) {
+        Printf("ERROR: setting up timer! (%ld)\n", rc);
+    } else {
+        /* main loop */
+        struct MidiNode *node = midi_setup.node;
+        while(alive) {
+            sigmask = Wait(SIGBREAKF_CTRL_C | 1L<<midi_setup.rx_sig);
+            if(sigmask & SIGBREAKF_CTRL_C)
+                alive=FALSE;
+            while(GetMidi(midi_setup.node, &msg)) {
+                if(verbose)
+                    Printf("%08ld: %08lx\n", msg.mm_Time, msg.mm_Msg);
+                handle_msg(msg.mm_Status, msg.mm_Data1, msg.mm_Data2);
+            }
         }
+
+        midi_tools_exit_time();
     }
 
     midi_close(&midi_setup);
