@@ -9,6 +9,7 @@ channel 16 cp 33
 channel 15 pb 1024
 channel 15 pb 2048
 syx 1 2 3 4
+hex syx 2f 3e 4c dec
 time-code 10 8
 song-position 1024
 song-select 27

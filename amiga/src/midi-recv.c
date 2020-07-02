@@ -103,7 +103,7 @@ static void handle_sysex(void)
                 Printf("%02lx ", (ULONG)buf[i]);
             }
             if(!hex) {
-                PutStr("\ndec");
+                PutStr(" dec");
             }
             PutStr("\n");
         }
