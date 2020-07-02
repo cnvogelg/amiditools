@@ -31,9 +31,156 @@ static int verbose;
 static struct MidiSetup midi_setup;
 static struct MidiLink *rx;
 /* command state */
-static int midi_channel = 0; /* 0..15 */
 static int note_numbers = 0;
 static int show_timestamp = 0;
+
+/* filter input */
+#define FILTER_VOICE                0x00007f
+#define FILTER_NOTE                 0x000003
+#define FILTER_NOTE_ON              0x000001
+#define FILTER_NOTE_OFF             0x000002
+#define FILTER_POLY_PRESSURE        0x000004
+#define FILTER_CONTROL_CHANGE       0x000008
+#define FILTER_PROGRAM_CHANGE       0x000010
+#define FILTER_CHANNEL_PRESSURE     0x000020
+#define FILTER_PITCH_BEND           0x000040
+
+#define FILTER_SYS_REAL_TIME        0x003f00
+#define FILTER_CLOCK                0x000100
+#define FILTER_START                0x000200
+#define FILTER_STOP                 0x000400
+#define FILTER_CONTINUE             0x000800
+#define FILTER_ACTIVE_SENSING       0x001000
+#define FILTER_RESET                0x002000
+
+#define FILTER_SYS_COMMON           0x1f0000
+#define FILTER_SYS_EX               0x010000
+#define FILTER_TIME_CODE            0x020000
+#define FILTER_SONG_POS             0x040000
+#define FILTER_SONG_SELECT          0x080000
+#define FILTER_TUNE_REQUEST         0x100000
+
+#define FILTER_ALL                  0xffffff
+
+#define NO_NOTE             255
+#define NO_VALUE            255
+#define NO_CHANNEL          0
+
+static ULONG filter = 0;
+static UBYTE filter_on_note = NO_NOTE;
+static UBYTE filter_off_note = NO_NOTE;
+static UBYTE filter_pp_note = NO_NOTE;
+static UBYTE filter_cc_val = NO_VALUE;
+static UBYTE filter_pc_val = NO_VALUE;
+static int filter_channel = NO_CHANNEL; /* 0..16 */
+
+static int check_channel(UBYTE chn)
+{
+    return ((chn + 1) == filter_channel) || (filter_channel == NO_CHANNEL);
+}
+
+static int filter_sys(UBYTE status)
+{
+    switch(status) {
+        // System Common
+        case MS_SysEx:
+            return (filter & FILTER_SYS_EX) == FILTER_SYS_EX;
+        case MS_QtrFrame:
+            return (filter & FILTER_TIME_CODE) == FILTER_TIME_CODE;
+        case MS_SongPos:
+            return (filter & FILTER_SONG_POS) == FILTER_SONG_POS;
+        case MS_SongSelect:
+            return (filter & FILTER_SONG_SELECT) == FILTER_SONG_SELECT;
+        case MS_TuneReq:
+            return (filter & FILTER_TUNE_REQUEST) == FILTER_TUNE_REQUEST;
+        // System Realtime
+        case MS_Clock:
+            return (filter & FILTER_CLOCK) == FILTER_CLOCK;
+        case MS_Start:
+            return (filter & FILTER_START) == FILTER_START;
+        case MS_Continue:
+            return (filter & FILTER_CONTINUE) == FILTER_CONTINUE;
+        case MS_Stop:
+            return (filter & FILTER_STOP) == FILTER_STOP;
+        case MS_ActvSense:
+            return (filter & FILTER_ACTIVE_SENSING) == FILTER_ACTIVE_SENSING;
+        case MS_Reset:
+            return (filter & FILTER_RESET) == FILTER_RESET;
+
+        default:
+            break;
+    }
+    return 0;
+}
+
+static int filter_msg(UBYTE status, UBYTE data1)
+{
+    /* quick check */
+    if(filter == 0) {
+        return 0;
+    }
+    if(filter == FILTER_ALL) {
+        return 1;
+    }
+
+    UBYTE grp = status & MS_StatBits;
+    UBYTE chn = status & MS_ChanBits;
+
+    switch(grp) {
+        /* channel voice messages */
+        case MS_NoteOff: /* NoteOff */
+            if(check_channel(chn)) {
+                if((filter & FILTER_NOTE_OFF) == FILTER_NOTE_OFF) {
+                    return (filter_off_note == NO_NOTE) || (filter_off_note == data1);
+                }
+            }
+            break;
+        case MS_NoteOn: /* NoteOn */
+            if(check_channel(chn)) {
+                if((filter & FILTER_NOTE_ON) == FILTER_NOTE_ON) {
+                    return (filter_on_note == NO_NOTE) || (filter_on_note == data1);
+                }
+            }
+            break;
+        case MS_PolyPress: /* Key Pressure */
+            if(check_channel(chn)) {
+                if((filter & FILTER_POLY_PRESSURE) == FILTER_POLY_PRESSURE) {
+                    return (filter_pp_note == NO_NOTE) || (filter_pp_note == data1);
+                }
+            }
+            break;
+        case MS_Ctrl: /* Control Change */
+            if(check_channel(chn)) {
+                if((filter & FILTER_CONTROL_CHANGE) == FILTER_CONTROL_CHANGE) {
+                    return (filter_cc_val == NO_VALUE) || (filter_cc_val == data1);
+                }
+            }
+            break;
+        case MS_Prog: /* Program Change */
+            if(check_channel(chn)) {
+                if((filter & FILTER_PROGRAM_CHANGE) == FILTER_PROGRAM_CHANGE) {
+                    return (filter_pc_val == NO_VALUE) || (filter_pc_val == data1);
+                }
+            }
+            break;
+        case MS_ChanPress: /* Channel Pressure */
+            if(check_channel(chn)) {
+                return (filter & FILTER_CHANNEL_PRESSURE) == FILTER_CHANNEL_PRESSURE;
+            }
+            break;
+        case MS_PitchBend:
+            if(check_channel(chn)) {
+                return (filter & FILTER_PITCH_BEND) == FILTER_PITCH_BEND;
+            }
+            break;
+        case MS_System:
+            return filter_sys(status);
+        default:
+            break;
+    }
+
+    return 0;
+}
 
 /* output tools */
 
@@ -285,11 +432,6 @@ static void handle_pitch_bend(UBYTE chn, UBYTE lsb, UBYTE msb)
 
 /* handle midi message */
 
-static int check_channel(UBYTE channel)
-{
-    return (midi_channel == 0) || (midi_channel == channel);
-}
-
 static void handle_msg(UBYTE status, UBYTE data1, UBYTE data2)
 {
     UBYTE grp = status & MS_StatBits;
@@ -305,39 +447,25 @@ static void handle_msg(UBYTE status, UBYTE data1, UBYTE data2)
     switch(grp) {
         /* channel voice messages */
         case MS_NoteOff: /* NoteOff */
-            if(check_channel(chn)) {
-                handle_note_off(chn, data1, data2);
-            }
+            handle_note_off(chn, data1, data2);
             break;
         case MS_NoteOn: /* NoteOff */
-            if(check_channel(chn)) {
-                handle_note_on(chn, data1, data2);
-            }
+            handle_note_on(chn, data1, data2);
             break;
         case MS_PolyPress: /* Key Pressure */
-            if(check_channel(chn)) {
-                handle_poly_pressure(chn, data1, data2);
-            }
+            handle_poly_pressure(chn, data1, data2);
             break;
         case MS_Ctrl: /* Control Change */
-            if(check_channel(chn)) {
-                handle_control_change(chn, data1, data2);
-            }
+            handle_control_change(chn, data1, data2);
             break;
         case MS_Prog: /* Program Change */
-            if(check_channel(chn)) {
-                handle_program_change(chn, data1);
-            }
+            handle_program_change(chn, data1);
             break;
         case MS_ChanPress: /* Channel Pressure */
-            if(check_channel(chn)) {
-                handle_channel_pressure(chn, data1);
-            }
+            handle_channel_pressure(chn, data1);
             break;
         case MS_PitchBend:
-            if(check_channel(chn)) {
-                handle_pitch_bend(chn, data1, data2);
-            }
+            handle_pitch_bend(chn, data1, data2);
             break;
         case MS_System:
             handle_system_msg(status, data1, data2);
@@ -402,9 +530,162 @@ static int cmd_ch(int num_args, char **args)
         Printf("Invalid MIDI channel: %ld\n", ch);
         return 1;
     }
-    midi_channel = ch;
+    filter_channel = ch;
     if(verbose) 
-        Printf("channel: %ld\n", midi_channel);
+        Printf("channel: %ld\n", filter_channel);
+    return 0;
+}
+
+/* filter commands */
+
+static int cmd_voice(int num_args, char **args)
+{
+    filter |= FILTER_VOICE;
+    return 0;
+}
+
+static int cmd_note(int num_args, char **args)
+{
+    filter |= FILTER_NOTE;
+    return 0;
+}
+
+static int cmd_on(int num_args, char **args)
+{
+    filter |= FILTER_NOTE_ON;
+    if(num_args > 0) {
+        filter_on_note = midi_tools_parse_note(args[0]);
+    }
+    return 0;
+}
+
+static int cmd_off(int num_args, char **args)
+{
+    filter |= FILTER_NOTE_OFF;
+    if(num_args > 0) {
+        filter_off_note = midi_tools_parse_note(args[0]);
+    }
+    return 0;
+}
+
+static int cmd_pp(int num_args, char **args)
+{
+    filter |= FILTER_POLY_PRESSURE;
+    if(num_args > 0) {
+        filter_pp_note = midi_tools_parse_note(args[0]);
+    }
+    return 0;
+}
+
+static int cmd_cc(int num_args, char **args)
+{
+    filter |= FILTER_CONTROL_CHANGE;
+    if(num_args > 0) {
+        filter_cc_val = midi_tools_parse_number_7bit(args[0]);
+    }
+    return 0;
+}
+
+static int cmd_pc(int num_args, char **args)
+{
+    filter |= FILTER_PROGRAM_CHANGE;
+    if(num_args > 0) {
+        filter_pc_val = midi_tools_parse_number_7bit(args[0]);
+    }
+    return 0;
+}
+
+static int cmd_cp(int num_args, char **args)
+{
+    filter |= FILTER_CHANNEL_PRESSURE;
+    return 0;
+}
+
+static int cmd_pb(int num_args, char **args)
+{
+    filter |= FILTER_PITCH_BEND;
+    return 0;
+}
+
+/* sys realtime */
+
+static int cmd_sr(int num_args, char **args)
+{
+    filter |= FILTER_SYS_REAL_TIME;
+    return 0;
+}
+
+static int cmd_mc(int num_args, char **args)
+{
+    filter |= FILTER_CLOCK;
+    return 0;
+}
+
+static int cmd_start(int num_args, char **args)
+{
+    filter |= FILTER_START;
+    return 0;
+}
+
+static int cmd_stop(int num_args, char **args)
+{
+    filter |= FILTER_STOP;
+    return 0;
+}
+
+static int cmd_cont(int num_args, char **args)
+{
+    filter |= FILTER_CONTINUE;
+    return 0;
+}
+
+static int cmd_as(int num_args, char **args)
+{
+    filter |= FILTER_ACTIVE_SENSING;
+    return 0;
+}
+
+static int cmd_rst(int num_args, char **args)
+{
+    filter |= FILTER_RESET;
+    return 0;
+}
+
+/* sys common */
+
+static int cmd_sc(int num_args, char **args)
+{
+    filter |= FILTER_SYS_COMMON;
+    return 0;
+}
+
+static int cmd_syx(int num_args, char **args)
+{
+    filter |= FILTER_SYS_EX;
+    return 0;
+}
+
+static int cmd_tc(int num_args, char **args)
+{
+    filter |= FILTER_TIME_CODE;
+    return 0;
+}
+
+static int cmd_spp(int num_args, char **args)
+{
+    filter |= FILTER_SONG_POS;
+    return 0;
+}
+
+static int cmd_ss(int num_args, char **args)
+{
+    filter |= FILTER_SONG_SELECT;
+    return 0;
+}
+
+static int cmd_tun(int num_args, char **args)
+{
+    filter |= FILTER_TUNE_REQUEST;
     return 0;
 }
 
@@ -447,6 +728,31 @@ static cmd_t command_table[] = {
     { "dec", "decimal", 0, cmd_dec },
     { "omc", "octave-middle-c", 1, cmd_omc },
     { "ch", "channel", 1, cmd_ch },
+    /* filter voice */
+    { "voice", NULL, 0, cmd_voice },
+    { "note", NULL, 0, cmd_note },
+    { "on", "note-on", -1, cmd_on },
+    { "off", "note-off", -1, cmd_off },
+    { "pp", "poly-pressure", -1, cmd_pp },
+    { "cc", "control-change", 0, cmd_cc },
+    { "pc", "program-change", 0, cmd_pc },
+    { "cp", "channel-pressure", 0, cmd_cp },
+    { "pb", "pitch-bend", 0, cmd_pb },
+    /* filter sys rt */
+    { "sr", "system-realtime", 0, cmd_sr },
+    { "mc", "midi-clock", 0, cmd_mc },
+    { "start", NULL, 0, cmd_start },
+    { "stop", NULL, 0, cmd_stop },
+    { "cont", "continue", 0, cmd_cont },
+    { "as", "active-sensing", 0, cmd_as },
+    { "rst", "reset", 0, cmd_rst },
+    /* filter sys common */
+    { "sc", "system-common", 0, cmd_sc },
+    { "syx", "system-exclusive", 0, cmd_syx },
+    { "tc", "time-code", 0, cmd_tc },
+    { "spp", "song-position", 0, cmd_spp },
+    { "ss", "song-select", 0, cmd_ss },
+    { "tun", "tune-request", 0, cmd_tun },
     /* misc */
     { "file", NULL, 1, cmd_file },
     { "dev", "device", 1, cmd_dev },
@@ -504,8 +810,13 @@ static int run(char **cmd_line, ULONG sysex_max_size)
         return 1;
     }
 
+    /* if no filter is given keep all */
+    if(filter == 0) {
+        filter = FILTER_ALL;
+    }
+
     if(verbose)
-        Printf("midi-recv: from '%s'\n", midi_setup.rx_name);
+        Printf("midi-recv: from '%s'. filter=%06lx\n", midi_setup.rx_name, filter);
 
     int rc = midi_tools_init_time();
     if(rc!=0) {
@@ -520,7 +831,14 @@ static int run(char **cmd_line, ULONG sysex_max_size)
             while(GetMidi(midi_setup.node, &msg)) {
                 if(verbose)
                     Printf("%08ld: %08lx\n", msg.mm_Time, msg.mm_Msg);
-                handle_msg(msg.mm_Status, msg.mm_Data1, msg.mm_Data2);
+
+                int filter = filter_msg(msg.mm_Status, msg.mm_Data1);
+                if(filter) {
+                    handle_msg(msg.mm_Status, msg.mm_Data1, msg.mm_Data2);
+                } else {
+                    if(verbose)
+                        Printf("FILTERED by %06lx\n", filter);
+                }
             }
         }
 
