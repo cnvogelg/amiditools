@@ -122,24 +122,37 @@ class MidiPacket:
 
 
 class UDPServer:
-    def __init__(self, host_addr=None, max_size=1024):
+    def __init__(self, host_addr=None, max_pkt_size=1024, default_port=0):
         if not host_addr:
-            host_addr = ('localhost', 6820)
+            host_addr = ('localhost', default_port)
         host_addr = (socket.gethostbyname(host_addr[0]), host_addr[1])
         self.host_addr = host_addr
-        self.max_size = max_size
+        self.max_pkt_size = max_pkt_size
         self.sock = socket.socket(family=socket.AF_INET, 
                                   type=socket.SOCK_DGRAM)
         self.sock.bind(host_addr)
 
+    @staticmethod
+    def parse_addr_str(host_str, default_port):
+        """parse a string in hostname[:port] notation
+
+        Return (host_name, port)
+        """
+        pos = host_str.find(':')
+        if pos == -1:
+            return (host_str, default_port)
+        host_name = host_str[:pos]
+        port = int(host_str[pos+1:])
+        return (host_name, port)
+
     def __repr__(self):
-        return "UDPServer(host_addr={}, max_size={})".format(
-            self.host_addr, self.max_size
+        return "UDPServer(host_addr={}, max_pkt_size={})".format(
+            self.host_addr, self.max_pkt_size
         )
 
     def recv(self):
         """receive next MidiPacket and return (pkt, peer_addr)"""
-        data, addr = self.sock.recvfrom(self.max_size)
+        data, addr = self.sock.recvfrom(self.max_pkt_size)
         return MidiPacket.decode(data), addr
 
     def send(self, pkt, addr):
@@ -180,10 +193,15 @@ class MidiPort:
 
 
 class MidiServer:
-    def __init__(self, host_addr=None, max_size=1024,
+
+    DEFAULT_SERVER_PORT = 6820
+    DEFAULT_CLIENT_PORT = 6821
+
+    def __init__(self, host_addr=None, max_pkt_size=1024,
                  max_ports=8, peer_addr=None):
         self.max_ports = max_ports
-        self.udp_srv = UDPServer(host_addr, max_size)
+        self.udp_srv = UDPServer(host_addr, max_pkt_size,
+                                 default_port=self.DEFAULT_SERVER_PORT)
         self.port_map = {}
         # state
         self.recv_seq_num = 0
@@ -191,7 +209,20 @@ class MidiServer:
         if peer_addr:
             peer_addr = (socket.gethostbyname(peer_addr[0]), peer_addr[1])
         self.peer_addr = peer_addr
+        self.host_addr = self.udp_srv.host_addr
         self.lost_pkts = 0
+
+    def get_host_and_peer_addr(self):
+        return self.host_addr, self.peer_addr
+
+    @classmethod
+    def parse_from_str(cls, host_str, peer_str,
+                       max_ports=8, max_pkt_size=1024):
+        host_addr = UDPServer.parse_addr_str(host_str,
+                                             cls.DEFAULT_SERVER_PORT)
+        peer_addr = UDPServer.parse_addr_str(peer_str,
+                                             cls.DEFAULT_CLIENT_PORT)
+        return cls(host_addr, max_pkt_size, max_ports, peer_addr)
 
     def __repr__(self):
         return "MidiServer(udp_srv={}, max_ports={}, peer_addr={})" \

@@ -6,67 +6,55 @@ import logging
 import rtmidi
 import rtmidi.midiutil
 from miditools.udpmidi import MidiServer
+from miditools.portconf import MidiPortPairArray
 
 
-def main_loop(srv, midi_out):
+def main_loop(srv, ports):
+
+    # setup input handler
+    for port_num, midi_in in ports.get_midi_in_ports():
+        def cb(msg_time, data):
+            midi_in_handler(msg_time, srv, port_num)
+        midi_in.set_callback(cb)
+        midi_in.ignore_types(sysex=False)
+
     while(True):
-        # get next message
-        pkt, port = srv.recv()
-        # some stats
-        lost_pkts = srv.get_lost_pkts()
-        if lost_pkts:
-            logging.warning("lost packets: %d", lost_pkts)
-        # forward
-        if pkt.is_sysex():
-            sysex = pkt.get_sysex()
-            logging.debug("RX(sysex): %s -> %s", pkt, sysex)
-            midi_out.send_message(sysex)
-        else:
-            msg = pkt.get_msg()
-            tup = msg.get_tuple()
-            logging.debug("RX: %s -> %s", pkt, tup)
-            midi_out.send_message(tup)
+        try:
+            # get next message
+            pkt, port = srv.recv()
+            # some stats
+            lost_pkts = srv.get_lost_pkts()
+            if lost_pkts:
+                logging.warning("lost packets: %d", lost_pkts)
+            # forward
+            port_num = pkt.get_port_num()
+            midi_out = ports.get_midi_out(port_num)
+            if not midi_out:
+                logging.warning("#%d: Port unknown!: %s", port_num, pkt)
+            elif pkt.is_sysex():
+                sysex = pkt.get_sysex()
+                logging.debug("#%d: RX(sysex): %s -> %s", port_num, pkt, sysex)
+                midi_out.send_message(sysex)
+            else:
+                msg = pkt.get_msg()
+                tup = msg.get_tuple()
+                logging.debug("#%d: RX: %s -> %s", port_num, pkt, tup)
+                midi_out.send_message(tup)
+        except KeyboardInterrupt:
+            logging.info("shutting down...")
+            break
 
 
-def midi_in_handler(msg_time, srv):
+def midi_in_handler(msg_time, srv, port_num):
     raw_msg, time = msg_time
-    port_num = 0
     # is sysex?
     if raw_msg[0] == 0xf0:
         sysex = bytes(raw_msg)
         pkt = srv.send_sysex(port_num, sysex)
-        logging.debug("TX(sysex): %s -> %s", sysex, pkt)
+        logging.debug("#%d: TX(sysex): %s -> %s", port_num, sysex, pkt)
     else:
         pkt = srv.send_raw_msg(port_num, raw_msg)
-        logging.debug("TX: %s -> %s", raw_msg, pkt)
-
-
-def setup_midi(midi_in_name, midi_out_name):
-    # open midi in
-    try:
-        midi_in, name = rtmidi.midiutil.open_midiinput(midi_in_name,
-                                                       interactive=False)
-        logging.info("midi in:  %s -> %s", midi_in_name, name)
-    except rtmidi.InvalidPortError:
-        logging.error("Invalid midi in port: %s", midi_in_name)
-        return None
-    # open midi out
-    try:
-        midi_out, name = rtmidi.midiutil.open_midioutput(midi_out_name,
-                                                         interactive=False)
-        logging.info("midi out: %s -> %s", midi_out_name, name)
-    except rtmidi.InvalidPortError:
-        logging.error("Invalid midi out port: %s", midi_out_name)
-        return None
-    return midi_in, midi_out
-
-
-def setup_server(srv_addr, peer_addr):
-    logging.debug("server addr: %s", srv_addr)
-    logging.debug("peer addr:   %s", peer_addr)
-    srv = MidiServer(host_addr=srv_addr, peer_addr=peer_addr)
-    logging.debug("server: %s", srv)
-    return srv
+        logging.debug("#%d: TX: %s -> %s", port_num, raw_msg, pkt)
 
 
 def list_ports():
@@ -78,27 +66,25 @@ DESC = "transfer Midi data between Midi UDP and a local Midi port"
 LOG_FORMAT = '%(asctime)-8s.%(msecs)03d   %(levelname)-7s  %(message)s'
 TIME_FORMAT = "%H:%M:%S"
 
+
 def main():
     # parse args
     parser = argparse.ArgumentParser(description=DESC)
-    parser.add_argument('-i', '--in-port', help='Midi input port')
-    parser.add_argument('-o', '--out-port', help='Midi output port')
+    parser.add_argument('-p', '--ports', nargs='+', default=[],
+                        help='Define midi port pair: midi_in:midi_out[+] '
+                        'Repeat for multiple ports.')
     parser.add_argument('-l', '--list-ports', action='store_true',
                         help='List all input and output ports')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help="verbose output")
     parser.add_argument('-d', '--debug', action='store_true',
                         help="enabled debug output")
-    parser.add_argument('-s', '--server-name',
-                        help="host name of UDP server. default=localhost",
+    parser.add_argument('-s', '--server',
+                        help="host addr of UDP server. default=localhost:6820",
                         default="localhost")
-    parser.add_argument('-S', '--server-port', type=int, default=6820,
-                        help="port number of UDP server. default=6820")
-    parser.add_argument('-c', '--client-name',
-                        help="host name of UDP client. default=localhost",
+    parser.add_argument('-c', '--client',
+                        help="host addr of UDP client. default=localhost:6821",
                         default="localhost")
-    parser.add_argument('-C', '--client-port', type=int, default=6821,
-                        help="port number of UDP client. default=6821")
     opts = parser.parse_args()
 
     # setup logging
@@ -114,22 +100,24 @@ def main():
         list_ports()
         return 0
 
-    # open midi
-    in_out = setup_midi(opts.in_port, opts.out_port)
-    if not in_out:
-        list_ports()
-        return 0
-    midi_in, midi_out = in_out
+    # midi ports
+    ports = MidiPortPairArray()
+    for port in opts.ports:
+        ports.parse_port_pair_from_str(port)
+
+    num_ports = ports.get_num_ports()
+    if num_ports == 0:
+        logging.error("No midi ports defined! Use '-p' option. Aborting...")
+        return 1
 
     # open server
-    srv_addr = (opts.server_name, opts.server_port)
-    peer_addr = (opts.client_name, opts.client_port)
-    srv = setup_server(srv_addr, peer_addr)
+    srv = MidiServer.parse_from_str(opts.server, opts.client)
+    host_addr, peer_addr = srv.get_host_and_peer_addr()
+    logging.info("host_addr: %s", host_addr)
+    logging.info("peer_addr: %s", peer_addr)
 
     # main loop
-    midi_in.set_callback(midi_in_handler, srv)
-    midi_in.ignore_types(sysex=False)
-    return main_loop(srv, midi_out)
+    return main_loop(srv, ports)
 
 
 if __name__ == '__main__':

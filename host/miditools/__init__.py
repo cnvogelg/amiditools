@@ -1,3 +1,3 @@
 # module miditools
 
-__all__ = ["udpmidi"]
+__all__ = ["udpmidi", "portconf"]
