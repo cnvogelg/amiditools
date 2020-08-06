@@ -122,6 +122,9 @@ INSTALL_FILES=$(patsubst $(BIN_DIR)/%,$(INSTALL_DIR)/%,$(TOOLS))
 install: init $(INSTALL_FILES)
 	cp -f midi-test $(INSTALL_DIR)/
 
+install-release:
+	$(MAKE) FLAVOR=release install
+
 clean:
 	rm -rf $(BIN_DIR) $(DIST_DIR)
 
