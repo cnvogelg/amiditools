@@ -17,6 +17,8 @@ class PerfSample:
         midi_out.send_message(self.midi_cmd)
         self.tx_ts = ts
         self.rx_ts = None
+        if self.delay:
+            time.sleep(self.delay)
 
     def recv(self, midi_cmd, ts):
         if midi_cmd != self.midi_cmd:
@@ -102,19 +104,33 @@ class PerfBurst:
             sample.reset()
 
 
+def delay_step_generator(delay_step=10, delay=0.001):
+    while True:
+        if delay_step == 0:
+            yield(0.0)
+        else:
+            for i in range(delay_step-1):
+                yield(0.0)
+            yield(delay)
+
+
 class SampleGenerator:
     @staticmethod
-    def note_on_sweep(start=0, end=128, step=1, velocity=42, channel=0):
+    def note_on_sweep(start=0, end=128, step=1, velocity=42, channel=0,
+                      delay_step=5, delay=0.001):
         result = []
+        ds = delay_step_generator(delay_step, delay)
         for note in range(start, end, step):
             cmd = [0x90 | channel, note, velocity]
-            result.append(PerfSample(cmd))
+            result.append(PerfSample(cmd, ds.__next__()))
         return result
 
     @staticmethod
-    def note_off_sweep(start=0, end=128, step=1, velocity=42, channel=0):
+    def note_off_sweep(start=0, end=128, step=1, velocity=42, channel=0,
+                       delay_step=5, delay=0.001):
         result = []
+        ds = delay_step_generator(delay_step, delay)
         for note in range(start, end, step):
             cmd = [0x80 | channel, note, velocity]
-            result.append(PerfSample(cmd))
+            result.append(PerfSample(cmd, ds.__next__()))
         return result
