@@ -1,28 +1,115 @@
 #!/usr/bin/env python3
 
-import mido
+import sys
 import time
+import argparse
+import logging
+import statistics
 
-mido.set_backend('mido.backends.portmidi')
-print(mido.backend)
-print("OUT:")
-print(mido.get_output_names())
-print("IN:")
-print(mido.get_input_names())
+import rtmidi
+import rtmidi.midiutil
 
-in_name = "Amiga Out"
-out_name = "Amiga In"
-in_port = mido.open_input(in_name)
-out_port = mido.open_output(out_name)
+from miditools.perf import PerfBurst, SampleGenerator
+from miditools.portconf import MidiPortPairArray
 
-while True:
-    msg = mido.Message('note_on')
-    start = time.perf_counter()
-    out_port.send(msg)
-    in_msg = in_port.receive()
-    end = time.perf_counter()
-    delta = end - start
-    print("delta:", delta * 1000)
-    if in_msg != msg:
-        print("MISMATCH")
-    time.sleep(1)
+
+def analyse_latencies(latencies):
+    mean = statistics.mean(latencies)
+    stdev = statistics.stdev(latencies, mean)
+    min_lat = min(latencies)
+    max_lat = max(latencies)
+    print("#{}: min={:6.2f}, max={:6.2f}, mean={:6.2f}, stdev={:6.2f}".format(
+        len(latencies), min_lat, max_lat, mean, stdev))
+
+
+def main_loop(midi_in, midi_out):
+
+    burst = PerfBurst()
+    burst.add_sample_list(SampleGenerator.note_on_sweep())
+    burst.add_sample_list(SampleGenerator.note_off_sweep())
+
+    midi_in.set_callback(midi_in_handler, burst)
+    midi_in.ignore_types(sysex=False)
+
+    while(True):
+        try:
+            logging.info("sending samples...")
+            for sample in burst.samples:
+                logging.info("%r", sample)
+            burst.send_samples(midi_out)
+            logging.info("waiting...")
+            ok = burst.wait_done()
+            lost = burst.get_num_lost()
+            logging.info("done. ok=%s, lost=%d", ok, lost)
+            if not ok:
+                print("Time out!")
+            else:
+                if lost > 0:
+                    print("Lost: {}".format(lost))
+                latencies = burst.get_latencies()
+                analyse_latencies(latencies)
+
+            burst.reset()
+            time.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("shutting down...")
+            break
+
+
+def midi_in_handler(msg_time, burst):
+    raw_msg, time = msg_time
+    burst.incoming_message(raw_msg)
+
+
+def list_ports():
+    rtmidi.midiutil.list_input_ports()
+    rtmidi.midiutil.list_output_ports()
+
+
+DESC = "benchmark Midi performance by sending/receiving a set of messages."
+LOG_FORMAT = '%(asctime)-8s.%(msecs)03d   %(levelname)-7s  %(message)s'
+TIME_FORMAT = "%H:%M:%S"
+
+
+def main():
+    # parse args
+    parser = argparse.ArgumentParser(description=DESC)
+    parser.add_argument('-p', '--port',
+                        help='Define midi port pair: midi_in:midi_out[+] '
+                        'Make sure out echoes in data!')
+    parser.add_argument('-l', '--list-ports', action='store_true',
+                        help='List all input and output ports')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help="verbose output")
+    parser.add_argument('-d', '--debug', action='store_true',
+                        help="enabled debug output")
+    opts = parser.parse_args()
+
+    # setup logging
+    level = logging.WARNING
+    if opts.debug:
+        level = logging.DEBUG
+    elif opts.verbose:
+        level = logging.INFO
+    logging.basicConfig(level=level, format=LOG_FORMAT, datefmt=TIME_FORMAT)
+
+    # list ports
+    if opts.list_ports:
+        list_ports()
+        return 0
+
+    # midi ports
+    ports = MidiPortPairArray()
+    ports.parse_port_pair_from_str(opts.port)
+    midi_in = ports.get_midi_in(0)
+    midi_out = ports.get_midi_out(0)
+    if not midi_in or not midi_out:
+        logging.error("Either midi in or out is missing/invalid!")
+        return 1
+
+    # main loop
+    return main_loop(midi_in, midi_out)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

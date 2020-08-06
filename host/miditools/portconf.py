@@ -52,13 +52,19 @@ class MidiPortPairArray:
 
     def add_port_pair(self, midi_in_name, midi_out_name, virtual=False):
         index = len(self.ports)
+        logging.debug("add_port_pair: in=%s, out=%s, virtual=%s",
+                      midi_in_name, midi_out_name, virtual)
         # open midi in
         if midi_in_name:
             try:
-                midi_in, name = rtmidi.midiutil.open_midiinput(
-                    midi_in_name,
-                    interactive=False,
-                    use_virtual=virtual)
+                if virtual:
+                    midi_in = rtmidi.MidiIn()
+                    midi_in.open_virtual_port(midi_in_name)
+                    name = midi_in_name
+                else:
+                    midi_in, name = rtmidi.midiutil.open_midiinput(
+                        midi_in_name,
+                        interactive=False)
                 logging.info("#%d: midi in:  %s -> %s (virtual=%s)", index,
                              midi_in_name, name, virtual)
             except rtmidi.InvalidPortError:
@@ -69,10 +75,14 @@ class MidiPortPairArray:
         # open midi out
         if midi_out_name:
             try:
-                midi_out, name = rtmidi.midiutil.open_midioutput(
-                    midi_out_name,
-                    interactive=False,
-                    use_virtual=virtual)
+                if virtual:
+                    midi_out = rtmidi.MidiOut()
+                    midi_out.open_virtual_port(midi_out_name)
+                    name = midi_out_name
+                else:
+                    midi_out, name = rtmidi.midiutil.open_midioutput(
+                        midi_out_name,
+                        interactive=False)
                 logging.info("#%d: midi out: %s -> %s (virtual=%s)", index,
                              midi_out_name, name, virtual)
             except rtmidi.InvalidPortError:
