@@ -60,10 +60,11 @@ int midi_drv_config(char *cfg_file, char *arg_template,
 
     /* only need DOS for config */
     if(DOSBase = (struct DosLibrary *)OpenLibrary ("dos.library",36)) {
+        D(("dosbase %08lx  file %s\n", DOSBase, cfg_file));
         /* try to read config */
         if(cfginput = Open(cfg_file, MODE_OLDFILE)) {
             D(("opened cfg file: '%s'\n", cfg_file));
-            oldinput = SelectInput(cfginput);      
+            oldinput = SelectInput(cfginput);
             rda = ReadArgs(arg_template, (LONG *)param, NULL);
             if(rda != NULL) {
                 D(("got args\n"));
@@ -73,7 +74,9 @@ int midi_drv_config(char *cfg_file, char *arg_template,
                 D(("failed parsing args!\n"));
                 result = MIDI_DRV_RET_PARSE_ERROR;
             }
-            Close(SelectInput(oldinput));
+            D(("close cfg\n"));
+            Close(cfginput);
+            SelectInput(oldinput);
         } else {
             D(("cfg file not found: '%s'\n", cfg_file));
             result = MIDI_DRV_RET_FILE_NOT_FOUND;
@@ -208,18 +211,20 @@ SAVEDS static void task_main(void)
     // alloc worker sig
     worker_sig = AllocSignal(-1);
     if(worker_sig == -1) {
-        D(("midi: no worker_sig!\n"));
-        goto init_done;
+        D(("midi task: no worker_sig!\n"));
+        Signal(main_task, main_sig);
+        return;
     }
 
     if(midi_drv_api_init(SysBase) != 0) {
-        D(("midi: proto_init failed!\n"));
-        goto init_done;
+        D(("midi task: proto_init failed!\n"));
+        Signal(main_task, main_sig);
+        FreeSignal(worker_sig);
+        return;
     }
 
     worker_status = TRUE;
 
-init_done:
     // report back that init is done
     D(("midi task: Init done.\n"));
     Signal(main_task, main_sig);
@@ -266,7 +271,7 @@ SAVEDS BOOL ASM midi_drv_init(REG(a6, APTR sysbase))
     main_task = FindTask(NULL);
 
     // setup worker task
-    worker_task = CreateTask("midi.udp", 50L, (void *)task_main, 6000L);
+    worker_task = CreateTask("midi.udp", 0L, (void *)task_main, 6000L);
     if(worker_task == NULL) {
         D(("midi: create task failed!\n"));
         return FALSE;

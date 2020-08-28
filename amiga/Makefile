@@ -16,11 +16,13 @@ NDK_INC_ASM = $(NDK_DIR)/include/include_i
 CAMD_INC = include
 NET_INC ?= $(HOME)/projects/amidev/roadshow/netinclude
 
-CFLAGS_debug += -DKDEBUG=1
+CFLAGS_debug += -DKDEBUG=1 -g
 CFLAGS = -c99 -Os -+ -sc -I$(VBCC_INC) -I$(NDK_INC) -I$(CAMD_INC) -I$(NET_INC)
 CFLAGS += $(CFLAGS_$(FLAVOR))
 LDFLAGS = -Os -+ -sc -L$(VBCC_LIB) -L$(NDK_LIB) -lamiga
 LDFLAGS_DRV = $(LDFLAGS) -nostdlib -ldebug
+LDFLAGS_debug = -g
+LDFLAGS += $(LDFLAGS_$(FLAVOR))
 
 BUILD_DIR=build
 BIN_DIR=$(BUILD_DIR)/$(FLAVOR)
