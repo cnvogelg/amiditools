@@ -37,12 +37,11 @@ int udp_addr_setup(struct udp_handle *uh, struct sockaddr_in *addr,
   D(("resolving host: '%s'\n", name));
   he = gethostbyname(name);
   if(he != NULL) {
-    D(("found!\n"));
-
     addr->sin_family = AF_INET;      /* host byte order */
     addr->sin_port = htons(port);  /* short, network byte order */
     addr->sin_addr = *((struct in_addr *)he->h_addr);
     memset(&(addr->sin_zero), 0, 8);     /* zero the rest of the struct */
+    D(("found addr: %lx\n", addr->sin_addr));
     return 0;
   }
   return -1;
@@ -53,7 +52,7 @@ int udp_open(struct udp_handle *uh, struct sockaddr_in *bind_addr)
   // open socket
   int sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
   if(sock_fd < 0) {
-    D(("socket failed: %d\n", sock_fd));
+    D(("bind failed: %ld  errno: %ld\n", sock_fd, Errno()));
     return sock_fd;
   }
 
@@ -61,7 +60,7 @@ int udp_open(struct udp_handle *uh, struct sockaddr_in *bind_addr)
   if(bind_addr != NULL) {
     int result = bind(sock_fd, (struct sockaddr *)bind_addr, sizeof(struct sockaddr_in));
     if(result < 0) {
-      D(("bind failed: %d\n", result));
+      D(("bind failed: %ld  addr: %lx:%ld  errno: %ld\n", result, bind_addr->sin_addr, bind_addr->sin_port, Errno()));
       return result;
     }
   }
