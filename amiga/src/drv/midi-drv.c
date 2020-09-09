@@ -31,7 +31,7 @@ static BYTE main_sig;
 static BYTE worker_sig;
 static BOOL worker_status;
 static int activate_portmask;
-static struct SignalSemaphore sem;
+static struct SignalSemaphore sem_mask;
 
 // driver config
 ULONG midi_drv_sysex_max_size = MIDI_DRV_DEFAULT_SYSEX_SIZE;
@@ -43,6 +43,7 @@ struct port_data {
     struct MidiPortData port_data;
     APTR user_data;
     struct midi_parser_handle parser;
+    struct SignalSemaphore sem_port;
 };
 struct port_data ports[MIDI_DRV_NUM_PORTS];
 
@@ -96,8 +97,15 @@ static void port_xmit(int portnum)
     D(("port xmit %ld\n", portnum));
     struct port_data *pd = &ports[portnum];
     
+    ObtainSemaphore(&pd->sem_port);
     while(1) {
+        // port was closed
+        if(pd->tx_func == NULL) {
+            D(("TX: closed...\n"));
+            break;
+        }
         ULONG data = pd->tx_func(pd->user_data);
+        // no more data
         if(data == 0x100) {
             break;
         }
@@ -106,51 +114,68 @@ static void port_xmit(int portnum)
         // send regular message
         if(res == MIDI_PARSER_RET_MSG) {
             midi_msg_t msg = pd->parser.msg;
-            D(("TX: msg %08lx\n", msg));
-            midi_drv_api_tx_msg(portnum, msg);
+            midi_drv_msg_t dmsg = {
+                .port = portnum,
+                .midi_msg = msg
+            };
+            D(("TX: #%ld msg %08lx\n", portnum, msg));
+            midi_drv_api_tx_msg(&dmsg);
         }
         // send sysex
         else if(res == MIDI_PARSER_RET_SYSEX_OK) {
             D(("TX: sysex %ld\n", pd->parser.sysex_bytes));
             midi_msg_t msg = pd->parser.msg;
-            midi_drv_api_tx_sysex(portnum, msg, pd->parser.sysex_buf,
-                                  pd->parser.sysex_bytes);
+            midi_drv_msg_t dmsg = {
+                .port = portnum,
+                .midi_msg = msg,
+                .sysex_data = pd->parser.sysex_buf,
+                .sysex_size = pd->parser.sysex_bytes
+            };
+            midi_drv_api_tx_msg(&dmsg);
         }
     }
+    ReleaseSemaphore(&pd->sem_port);
 }
 
-static void port_recv(void)
+static void port_recv(midi_drv_msg_t *msg)
 {
-    midi_msg_t msg;
-    int port;
-    int res = midi_drv_api_rx_msg(&port, &msg);
-    D(("rx: #%ld res=%ld msg=%08lx\n", port, res, msg));
-    if(res != MIDI_DRV_RET_OK) {
-        return;
-    }
-    if(port < MIDI_DRV_NUM_PORTS) {
-        struct port_data *pd = &ports[port];
+    if(msg->port < MIDI_DRV_NUM_PORTS) {
+        struct port_data *pd = &ports[msg->port];
         
+        ObtainSemaphore(&pd->sem_port);
+        
+        // port was closed?
+        if(pd->rx_func == NULL) {
+            D(("RX: closed...\n"));
+            return;
+        }
+
         // is sysex?
-        if(msg.b[MIDI_MSG_STATUS] == MS_SysEx) {
-            ULONG num_bytes = 0;
-            UBYTE *buf = NULL;
-            midi_drv_api_rx_sysex(port, &buf, &num_bytes);
-            if(buf != NULL) {
-                for(ULONG i=0;i<num_bytes;i++) {
-                    D(("RXs: %02lx\n", buf[i]));
-                    pd->rx_func(buf[i], pd->user_data);
-                }
+        if(msg->midi_msg.b[MIDI_MSG_STATUS] == MS_SysEx) {
+            if((msg->sysex_data == NULL) || (msg->sysex_size == 0)) {
+                D(("RX: no sysex data??\n"));
+                return;
+            }
+            ULONG num_bytes = msg->sysex_size;
+            UBYTE *data = msg->sysex_data;
+            for(ULONG i=0;i<num_bytes;i++) {
+                D(("RXs: #%ld %02lx\n", msg->port, data[i]));
+                pd->rx_func(data[i], pd->user_data);
             }
         }
         // regular message
         else {
-            int num_bytes = msg.b[MIDI_MSG_SIZE];
+            int num_bytes = msg->midi_msg.b[MIDI_MSG_SIZE];
             for(int i=0;i<num_bytes;i++) {
-                D(("RX: %02lx\n", msg.b[i]));
-                pd->rx_func(msg.b[i], pd->user_data);
+                D(("RX: #%ld %02lx\n", msg->port, msg->midi_msg.b[i]));
+                pd->rx_func(msg->midi_msg.b[i], pd->user_data);
             }
         }
+
+        ReleaseSemaphore(&pd->sem_port);
+
+    } else {
+        D(("RX: invalid port: %ld\n", msg->port));
     }
 }
 
@@ -163,11 +188,13 @@ static void main_loop(void)
     D(("midi: worker mask=%08lx\n", worker_sigmask));
     while(1) {
         ULONG got_sig = worker_sigmask | SIGBREAKF_CTRL_C;
-        int res = midi_drv_api_rx_wait(&got_sig);
-        D(("midi: wait res=%ld, mask=%08lx\n", res, got_sig));
+        midi_drv_msg_t *msg = NULL;
+        // block and get next message or return with signal
+        int res = midi_drv_api_rx_msg(&msg, &got_sig);
+        D(("midi: rx_msg res=%ld, mask=%08lx\n", res, got_sig));
 
         // own signal was received
-        if(res == MIDI_DRV_RET_SIGNAL) {
+        if(res == MIDI_DRV_RET_OK_SIGNAL) {
             // shutdown
             if((got_sig & SIGBREAKF_CTRL_C) == SIGBREAKF_CTRL_C) {
                 break;
@@ -178,10 +205,10 @@ static void main_loop(void)
                 ULONG mask;
                 
                 // fetch current mask
-                ObtainSemaphore(&sem);
+                ObtainSemaphore(&sem_mask);
                 mask = activate_portmask;
                 activate_portmask = 0;
-                ReleaseSemaphore(&sem);
+                ReleaseSemaphore(&sem_mask);
 
                 D(("midi: activate port mask: %08lx\n", mask));
                 for(int i=0;i<MIDI_DRV_NUM_PORTS;i++) {
@@ -192,7 +219,10 @@ static void main_loop(void)
             }
         }
         else if(res == MIDI_DRV_RET_OK) {
-            port_recv();
+            if(msg != NULL) { 
+                port_recv(msg);
+                midi_drv_api_rx_msg_done(msg);
+            }
         }
         // some error
         else {
@@ -250,15 +280,16 @@ SAVEDS BOOL ASM midi_drv_init(REG(a6, APTR sysbase))
     D(("midi: Init\n"));
     SysBase = sysbase;
     
-    midi_drv_api_config();
+    STRPTR name = midi_drv_api_config();
 
-    InitSemaphore(&sem);
+    InitSemaphore(&sem_mask);
 
     // init ports
     for(int i=0;i<MIDI_DRV_NUM_PORTS;i++) {
         ports[i].tx_func = NULL;
         ports[i].rx_func = NULL;
         ports[i].port_data.ActivateXmit = ActivateXmit;
+        InitSemaphore(&ports[i].sem_port);
     }
 
     // main signal for worker sync
@@ -271,7 +302,7 @@ SAVEDS BOOL ASM midi_drv_init(REG(a6, APTR sysbase))
     main_task = FindTask(NULL);
 
     // setup worker task
-    worker_task = CreateTask("midi.udp", 0L, (void *)task_main, 6000L);
+    worker_task = CreateTask(name, 0L, (void *)task_main, 6000L);
     if(worker_task == NULL) {
         D(("midi: create task failed!\n"));
         return FALSE;
@@ -312,11 +343,11 @@ SAVEDS ASM struct MidiPortData *midi_drv_open_port(
             D(("midi: parser_init failed!\n"));
             return NULL;
         }
-        ObtainSemaphore(&sem);
+        ObtainSemaphore(&ports[portnum].sem_port);
         ports[portnum].tx_func = tx_func;
         ports[portnum].rx_func = rx_func;
         ports[portnum].user_data = user_data;
-        ReleaseSemaphore(&sem);
+        ReleaseSemaphore(&ports[portnum].sem_port);
         return &ports[portnum].port_data;
     } else {
         return NULL;
@@ -330,10 +361,10 @@ SAVEDS ASM void midi_drv_close_port(
 {
     D(("midi: ClosePort(%ld)\n", portnum));
     if(portnum < MIDI_DRV_NUM_PORTS) {
-        ObtainSemaphore(&sem);
+        ObtainSemaphore(&ports[portnum].sem_port);
         ports[portnum].tx_func = NULL;
         ports[portnum].rx_func = NULL;
-        ReleaseSemaphore(&sem);
+        ReleaseSemaphore(&ports[portnum].sem_port);
         midi_parser_exit(&ports[portnum].parser);
     }
 }
@@ -341,8 +372,8 @@ SAVEDS ASM void midi_drv_close_port(
 static SAVEDS ASM void ActivateXmit(REG(a2, APTR userdata),REG(d0, LONG portnum))
 {
     D(("midi: ActivateXMit(%ld)\n", portnum));
-    ObtainSemaphore(&sem);
+    ObtainSemaphore(&sem_mask);
     activate_portmask |= 1 << portnum;
-    ReleaseSemaphore(&sem);
+    ReleaseSemaphore(&sem_mask);
     Signal(worker_task, 1 << worker_sig); 
 }

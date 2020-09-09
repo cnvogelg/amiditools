@@ -96,6 +96,10 @@ $(eval $(call build-app,midi-recv,$(MIDI_RECV_SRCS)))
 # common midi driver sources
 MIDI_DRV_SRCS=midi-drv.c debug.c midi-parser.c
 
+# midi-drv-echo
+MIDI_DRV_ECHO_SRCS=$(MIDI_DRV_SRCS) midi-drv-echo.c
+$(eval $(call build-drv,midi-drv-echo,$(MIDI_DRV_ECHO_SRCS)))
+
 # midi-drv-udp
 MIDI_DRV_UDP_SRCS=$(MIDI_DRV_SRCS) midi-drv-udp.c udp.c proto.c
 $(eval $(call build-drv,midi-drv-udp,$(MIDI_DRV_UDP_SRCS)))
