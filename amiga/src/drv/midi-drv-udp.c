@@ -35,47 +35,34 @@ extern struct ExecBase *SysBase;
 
 // UDP config
 #define NAME_LEN 80
-static char server_name[NAME_LEN] = "localhost";
-static char client_name[NAME_LEN] = "localhost";
+static char host_name[NAME_LEN] = "0.0.0.0";
 static struct proto_handle proto = {
-    .server_name = server_name,
-    .client_name = client_name,
-    .server_port = 6820,
-    .client_port = 6821
+    .my_name = host_name,
+    .my_port = 6820
 };
+static struct sockaddr_in peer_addr;
 
 /* Config Driver */
 
 #define CONFIG_FILE "ENV:midi/udp.config"
 #define ARG_TEMPLATE \
-    "CLIENT_HOST/K,CLIENT_PORT/K/N," \
-    "SERVER_HOST/K,SERVER_PORT/K/N," \
+    "HOST_NAME/K,PORT/K/N," \
     "SYSEX_SIZE/K/N"
 struct midi_drv_config_param {
-    STRPTR client_host;
-    ULONG *client_port;
-    STRPTR server_host;
-    ULONG *server_port;
+    STRPTR host_name;
+    ULONG *port;
     ULONG *sysex_size;
 };
 
 static int parse_args(struct midi_drv_config_param *param)
 {
-    if(param->client_host != NULL) {
-        D(("set client host: %s\n", param->client_host));
-        strncpy(client_name, param->client_host, NAME_LEN);
+    if(param->host_name != NULL) {
+        D(("set host name: %s\n", param->host_name));
+        strncpy(host_name, param->host_name, NAME_LEN);
     }
-    if(param->client_port != NULL) {
-        D(("set client port: %ld\n", *param->client_port));
-        proto.client_port = *param->client_port;
-    }
-    if(param->server_host != NULL) {
-        D(("set server host: %s\n", param->server_host));
-        strncpy(server_name, param->server_host, NAME_LEN);
-    }
-    if(param->server_port != NULL) {
-        D(("set server port: %ld\n", *param->server_port));
-        proto.server_port = *param->server_port;
+    if(param->port != NULL) {
+        D(("set port: %ld\n", *param->port));
+        proto.my_port = *param->port;
     }
     if(param->sysex_size != NULL) {
         D(("set sysex size: %ld\n", *param->sysex_size));
@@ -84,55 +71,75 @@ static int parse_args(struct midi_drv_config_param *param)
     return MIDI_DRV_RET_OK;
 }
 
-void midi_drv_api_config(void)
+STRPTR midi_drv_api_config(void)
 {
-    struct midi_drv_config_param param = { NULL, NULL, NULL, NULL, NULL };
+    struct midi_drv_config_param param = { NULL, NULL, NULL };
     midi_drv_config(CONFIG_FILE, ARG_TEMPLATE, &param, parse_args);
+    return "midi.udp";
 }
 
-void midi_drv_api_tx_msg(int port, midi_msg_t msg)
+void midi_drv_api_tx_msg(midi_drv_msg_t *msg)
 {
-    int res = proto_send_msg(&proto, port, msg);
+    struct proto_packet *pkt;
+    UBYTE *data_buf;
+
+    proto_send_prepare(&proto, &pkt, &data_buf);
+
+    pkt->magic = PROTO_MAGIC | PROTO_MAGIC_CMD_DATA;
+    pkt->port = msg->port;
+    pkt->seq_num = 42;
+    pkt->time_stamp.tv_secs = 4711;
+    pkt->time_stamp.tv_micro = 112;
+
+    ULONG sysex_size = msg->sysex_size;
+    if(sysex_size > 0) {
+        CopyMem(msg->sysex_data, data_buf, sysex_size);
+        pkt->data_size = sysex_size;
+    } else {
+        midi_msg_t *ptr = (midi_msg_t *)data_buf;
+        *ptr = msg->midi_msg;
+        pkt->data_size = sizeof(midi_msg_t);
+    }
+
+    int res = proto_send_packet(&proto, &peer_addr);
     if(res != 0) {
         D(("proto: msg send err: %ld\n", res));
     }
 }
 
-void midi_drv_api_tx_sysex(int port, midi_msg_t msg, UBYTE *data, ULONG size)
-{
-    int res = proto_send_sysex(&proto, port, msg, data, size);
-    if(res != 0) {
-        D(("proto: sysex send err: %ld\n", res));
-    }
-}
+static midi_drv_msg_t my_msg;
 
-int midi_drv_api_rx_msg(int *port, midi_msg_t *msg)
+int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *got_mask)
 {
-    int res = proto_recv_msg(&proto, port, msg);
-    if(res == 0) {
-        return MIDI_DRV_RET_OK;
-    } else {
-        return MIDI_DRV_RET_IO_ERROR;
-    }
-}
-
-void midi_drv_api_rx_sysex(int port, UBYTE **data, ULONG *size)
-{
-    proto_get_msg_buf(&proto, data, size);
-}
-
-int midi_drv_api_rx_wait(ULONG *got_mask)
-{
-    int res = proto_wait_recv(&proto, 0, got_mask);
+    D(("proto: rx\n"));
+    int res = proto_recv_wait(&proto, 0, 0, got_mask);
+    D(("proto: rx -> %ld\n", res));
     if(res == -1) {
         return MIDI_DRV_RET_IO_ERROR;
     }
     else if(res == 0) {
-        return MIDI_DRV_RET_SIGNAL;
+        return MIDI_DRV_RET_OK_SIGNAL;
     }
     else {
-        return MIDI_DRV_RET_OK;
+        struct proto_packet *pkt;
+        UBYTE *data_buf;
+        struct sockaddr_in peer_addr;
+        int res = proto_recv_packet(&proto, &peer_addr, &pkt, &data_buf);
+        if(res == 0) {
+            *msg = &my_msg;
+            my_msg.port = pkt->port;
+            my_msg.midi_msg = *((midi_msg_t *)data_buf);
+
+            return MIDI_DRV_RET_OK;
+        } else {
+            return MIDI_DRV_RET_IO_ERROR;
+        }
     }
+}
+
+void midi_drv_api_rx_msg_done(midi_drv_msg_t *msg)
+{
+    // nothing to do
 }
 
 int midi_drv_api_init(struct ExecBase *SysBase)

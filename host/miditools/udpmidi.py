@@ -58,23 +58,31 @@ class MidiMsg:
         return struct.pack("BBBB", *msg)
 
 
-class MidiPacket:
+class ProtoPacket:
 
-    MAGIC = 0x43414d44
+    MAGIC = 0x43414d00
+    MAGIC_MASK = 0xffffff00
+    CMD_INV = 0x49
+    CMD_INV_OK = 0x4f
+    CMD_INV_NO = 0x4e
+    CMD_EXIT = 0x45
+    CMD_DATA = 0x44
+    CMD_CLOCK = 0x43
 
-    """The MidiPacket is stored in an UDP frame."""
-    def __init__(self, seq_num=0, port=0, msg=None, sysex=None):
-        if not msg:
-            msg = MidiMsg()
+    """The ProtoPacket is stored in an UDP frame."""
+    def __init__(self, cmd, seq_num=0, port=0, data=None, ts=None):
+        self.cmd = cmd
         self.seq_num = seq_num
         self.port = port
-        self.msg = msg
-        self.sysex = sysex
+        self.data = data
+        self.ts = ts
 
     def __repr__(self):
-        return "MidiPacket(seq_num={}, port={}, msg={}, sysex={})".format(
-            self.seq_num, self.port, self.msg, self.sysex
-        )
+        return "ProtoPacket(cmd={}, seq_num={}, port={}, data={}, ts={})" \
+            .format(self.cmd, self.seq_num, self.port, self.data, self.ts)
+
+    def get_cmd(self):
+        return self.cmd
 
     def get_seq_num(self):
         return self.seq_num
@@ -82,43 +90,53 @@ class MidiPacket:
     def get_port_num(self):
         return self.port
 
-    def get_msg(self):
-        return self.msg
-
-    def get_sysex(self):
-        return self.sysex
-
-    def is_sysex(self):
-        return self.sysex is not None
+    def get_data(self):
+        return self.data
 
     @classmethod
     def decode(cls, data):
         n = len(data)
-        if n < 16:
+        if n < 24:
             raise DecoderError("MidiPacket too small: {}".format(n))
 
         # decode packet
-        magic, seq_num, port, msg_data = struct.unpack(">III4s", data[:16])
+        magic, port, seq_num, ts_sec, ts_micro, data_size = \
+            struct.unpack(">IIIIII", data[:24])
+
         # check magic
-        if magic != cls.MAGIC:
+        if (magic & cls.MAGIC_MASK) != cls.MAGIC:
             raise DecoderError("Invalid Magic: got={!x}".format(magic))
-        msg = MidiMsg.decode(msg_data)
+        cmd = magic & 0xff
 
-        # got sysex?
-        if n > 16:
-            sysex = data[16:]
+        # check size
+        if data_size != n - 24:
+            raise DecoderError("Invalid Size: got={!x}".format(data_size))
+
+        # extract data
+        if n > 24:
+            pkt_data = data[:24]
         else:
-            sysex = None
+            pkt_data = None
 
-        return cls(seq_num, port, msg, sysex)
+        return cls(cmd, seq_num, port, pkt_data, (ts_sec, ts_micro))
 
     def encode(self):
-        msg_data = self.msg.encode()
-        data = struct.pack(">III4s", self.MAGIC, self.seq_num, self.port,
-                           msg_data)
-        if self.sysex:
-            data += self.sysex
-        return data
+        if self.data:
+            data_size = len(self.data)
+        else:
+            data_size = 0
+        if self.ts:
+            ts0 = self.ts[0]
+            ts1 = self.ts[1]
+        else:
+            ts0 = 0
+            ts1 = 0
+        raw_pkt = struct.pack(">IIIIII",
+                              self.MAGIC | self.cmd, self.port, self.seq_num,
+                              ts0, ts1, data_size)
+        if self.data:
+            raw_pkt += self.data
+        return raw_pkt
 
 
 class UDPServer:
@@ -151,12 +169,12 @@ class UDPServer:
         )
 
     def recv(self):
-        """receive next MidiPacket and return (pkt, peer_addr)"""
+        """receive next ProtoPacket and return (pkt, peer_addr)"""
         data, addr = self.sock.recvfrom(self.max_pkt_size)
-        return MidiPacket.decode(data), addr
+        return ProtoPacket.decode(data), addr
 
     def send(self, pkt, addr):
-        """send a MidiPacket to client at addr"""
+        """send a ProtoPacket to client at addr"""
         data = pkt.encode()
         self.sock.sendto(data, addr)
 
@@ -201,7 +219,7 @@ class MidiServer:
                  max_ports=8, peer_addr=None):
         self.max_ports = max_ports
         self.udp_srv = UDPServer(host_addr, max_pkt_size,
-                                 default_port=self.DEFAULT_SERVER_PORT)
+                                 default_port=self.DEFAULT_CLIENT_PORT)
         self.port_map = {}
         # state
         self.recv_seq_num = 0
@@ -219,9 +237,9 @@ class MidiServer:
     def parse_from_str(cls, host_str, peer_str,
                        max_ports=8, max_pkt_size=1024):
         host_addr = UDPServer.parse_addr_str(host_str,
-                                             cls.DEFAULT_SERVER_PORT)
-        peer_addr = UDPServer.parse_addr_str(peer_str,
                                              cls.DEFAULT_CLIENT_PORT)
+        peer_addr = UDPServer.parse_addr_str(peer_str,
+                                             cls.DEFAULT_SERVER_PORT)
         return cls(host_addr, max_pkt_size, max_ports, peer_addr)
 
     def __repr__(self):
@@ -298,21 +316,18 @@ class MidiServer:
         self.udp_srv.send(pkt, self.peer_addr)
 
     def send_msg(self, port_num, msg):
-        pkt = MidiPacket(self.send_seq_num, port_num, msg)
+        pkt = ProtoPacket(ProtoPacket.CMD_DATA, self.send_seq_num, port_num, msg.encode())
         self.send(pkt)
         return pkt
 
     def send_raw_msg(self, port_num, raw_msg):
         msg = MidiMsg(raw_msg)
-        pkt = MidiPacket(self.send_seq_num, port_num, msg)
+        pkt = ProtoPacket(ProtoPacket.CMD_DATA, self.send_seq_num, port_num, msg.encode())
         self.send(pkt)
         return pkt
 
     def send_sysex(self, port_num, sysex):
-        # midi msg is first three bytes of sysex
-        msg_raw = list(map(int, sysex[:3]))
-        msg = MidiMsg(msg_raw)
-        pkt = MidiPacket(self.send_seq_num, port_num, msg, sysex)
+        pkt = ProtoPacket(ProtoPacket.CMD_DATA, self.send_seq_num, port_num, sysex )
         self.send(pkt)
         return pkt
 

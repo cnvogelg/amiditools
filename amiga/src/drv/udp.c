@@ -110,9 +110,9 @@ int udp_recv(struct udp_handle *uh, int sock_fd, struct sockaddr_in *ret_peer_ad
   return num;
 }
 
-int udp_wait_recv(struct udp_handle *uh, int sock_fd, ULONG timeout_us, ULONG *sigmask)
+int udp_wait_recv(struct udp_handle *uh, int sock_fd, ULONG timeout_s, ULONG timeout_us, ULONG *sigmask)
 {
-    struct timeval tv = { .tv_usec = timeout_us, .tv_sec = 0};
+    struct timeval tv = { .tv_usec = timeout_us, .tv_sec = timeout_s };
     struct timeval *tv_ptr = &tv;
     long n;
     fd_set read_fds;
@@ -120,10 +120,11 @@ int udp_wait_recv(struct udp_handle *uh, int sock_fd, ULONG timeout_us, ULONG *s
     FD_ZERO(&read_fds);
     FD_SET(sock_fd, &read_fds);
 
-    if(timeout_us == 0) {
+    if((timeout_us == 0) && (timeout_s == 0)) {
       tv_ptr = NULL;
     }
 
+    // return 0=timeout, -1=err, 1=fd rx
     n = WaitSelect(sock_fd + 1, &read_fds, NULL, NULL, tv_ptr, sigmask);
     if(n==-1) {
         D(("WaitSelect: failed!\n"));

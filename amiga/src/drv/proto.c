@@ -11,49 +11,53 @@
 
 #define SysBase ph->sysBase
 
-#define MAGIC    0x43414d44     // CAMD
-
 int proto_init(struct proto_handle *ph, struct ExecBase *sysBase, ULONG data_max_size)
 {
     ph->sysBase = sysBase;
-    ph->buf_max_bytes = data_max_size + 20; /* account for header */
-    ph->tx_seq_num = 0;
-    ph->rx_seq_num = 0;
+    ph->rx_max_bytes = data_max_size;
+    ULONG buf_size = data_max_size + sizeof(struct proto_packet); /* account for header */
 
     // allocate transfer buffer
-    ph->buf = AllocVec(ph->buf_max_bytes, MEMF_PUBLIC);
-    if(ph->buf == NULL) {
+    ph->rx_buf = AllocVec(buf_size, MEMF_PUBLIC);
+    if(ph->rx_buf == NULL) {
         D(("proto: no mem!\n"));
-        return 5;
+        return PROTO_RET_ERROR_NO_MEM;
+    }
+    ph->tx_buf = AllocVec(buf_size, MEMF_PUBLIC);
+    if(ph->tx_buf == NULL) {
+        D(("proto: no mem!\n"));
+        FreeVec(ph->rx_buf);
+        return PROTO_RET_ERROR_NO_MEM;
     }
 
     // setup udp
     if(udp_init(&ph->udp, SysBase) != 0) {
         D(("proto: udp_init failed!\n"));
-        return 1;
+        FreeVec(ph->rx_buf);
+        FreeVec(ph->tx_buf);
+        return PROTO_RET_ERROR_UDP_INIT;
     }
 
-    // resolve names
-    if(udp_addr_setup(&ph->udp, &ph->server_addr, ph->server_name, ph->server_port)!=0) {
-        D(("proto: server name lookup failed: %s\n", ph->server_name));
+    // resolve my name
+    if(udp_addr_setup(&ph->udp, &ph->my_addr, ph->my_name, ph->my_port)!=0) {
+        D(("proto: server name lookup failed: %s\n", ph->my_name));
+        FreeVec(ph->rx_buf);
+        FreeVec(ph->tx_buf);
         udp_exit(&ph->udp);
-        return 2;
-    }
-   if(udp_addr_setup(&ph->udp, &ph->client_addr, ph->client_name, ph->client_port)!=0) {
-        D(("proto: client name lookup failed: %s\n", ph->client_name));
-        udp_exit(&ph->udp);
-        return 3;
+        return PROTO_RET_ERROR_UDP_ADDR;
     }
 
-    // open sockets
-    ph->udp_fd = udp_open(&ph->udp, &ph->client_addr);
+    // open my socket
+    ph->udp_fd = udp_open(&ph->udp, &ph->my_addr);
     if(ph->udp_fd < 0) {
         D(("proto: error creating udp socket!\n"));
+        FreeVec(ph->rx_buf);
+        FreeVec(ph->tx_buf);
         udp_exit(&ph->udp);
-        return 4;
+        return PROTO_RET_ERROR_UDP_OPEN;
     }
 
-    return 0;
+    return PROTO_RET_OK;
 }
 
 void proto_exit(struct proto_handle *ph)
@@ -66,75 +70,80 @@ void proto_exit(struct proto_handle *ph)
     D(("proto: UDP shutdown\n"));
     udp_exit(&ph->udp);
 
-    FreeVec(ph->buf);
+    FreeVec(ph->rx_buf);
+    FreeVec(ph->tx_buf);
 }
 
-int proto_send_msg(struct proto_handle *ph, int port, midi_msg_t msg)
+void proto_send_prepare(struct proto_handle *ph,
+                        struct proto_packet **ret_pkt,
+                        UBYTE **ret_data)
 {
-    ULONG *buf = (ULONG *)ph->buf;
-    buf[0] = MAGIC;
-    buf[1] = ph->tx_seq_num++;
-    buf[2] = port;
-    buf[3] = msg.l;
-
-    return udp_send(&ph->udp, ph->udp_fd, &ph->server_addr, buf, 16);
+    *ret_pkt = (struct proto_packet *)ph->tx_buf;
+    *ret_data = ph->tx_buf + sizeof(struct proto_packet);
 }
 
-int proto_send_sysex(struct proto_handle *ph, int port, midi_msg_t msg, UBYTE *src_buf, ULONG size)
+int proto_send_packet(struct proto_handle *ph, 
+                      struct sockaddr_in *peer_addr)
 {
-    ULONG *buf = (ULONG *)ph->buf;
-    buf[0] = MAGIC;
-    buf[1] = ph->tx_seq_num++;
-    buf[2] = port;
-    buf[3] = msg.l;
+    struct proto_packet *pkt = (struct proto_packet *)ph->tx_buf;
+    ULONG  data_size = pkt->data_size;
+    ULONG  raw_size = sizeof(struct proto_packet) + data_size;
 
-    memcpy(&buf[4], src_buf, size);
-
-    return udp_send(&ph->udp, ph->udp_fd, &ph->server_addr, buf, 16 + size);
-}
-
-int proto_recv_msg(struct proto_handle *ph, int *port, midi_msg_t *msg)
-{
-    struct sockaddr_in client_addr;
-    int res = udp_recv(&ph->udp, ph->udp_fd, &client_addr, ph->buf, ph->buf_max_bytes);
-    if(res < 16) {
-        return 1;
-    }
-
-    ULONG *buf = (ULONG *)ph->buf;
-    // check magic
-    if(buf[0] != MAGIC) {
-        D(("proto: no magic!\n"));
-        return 2;
-    }
-
-    // check sequence number
-    ph->rx_seq_num++;
-    if(ph->rx_seq_num != buf[1]) {
-        D(("proto: rx_seq_num mismatch: %ld != %ld", ph->rx_seq_num, buf[1]));
-    }
-
-    // retrieve midi msg and port
-    msg->l = buf[3];
-    *port = buf[2];
-
-    // store extra size    
-    if(res >= 16) {
-        ph->buf_extra_bytes = res - 16;
+    if(!udp_send(&ph->udp, ph->udp_fd, peer_addr, ph->tx_buf, raw_size)) {
+        return PROTO_RET_OK;
     } else {
-        ph->buf_extra_bytes = 0;
+        return PROTO_RET_ERROR_UDP_IO;
+    }
+}
+
+int proto_recv_packet(struct proto_handle *ph,
+                      struct sockaddr_in *peer_addr,
+                      struct proto_packet **ret_pkt,
+                      UBYTE **ret_data)
+{
+    int res = udp_recv(&ph->udp, ph->udp_fd, peer_addr, ph->rx_buf, ph->rx_max_bytes);
+    if(res < sizeof(struct proto_packet)) {
+        D(("proto: pkt too short!\n"));
+        return PROTO_RET_ERROR_PKT_SHORT;
     }
 
-    return 0;
+    struct proto_packet *pkt = (struct proto_packet *)ph->rx_buf;
+
+    // check magic
+    ULONG magic = pkt->magic;
+    if((magic & PROTO_MAGIC_MASK) != PROTO_MAGIC) {
+        D(("proto: no magic!\n"));
+        return PROTO_RET_ERROR_NO_MAGIC;
+    }
+
+    // check command
+    UBYTE cmd = (UBYTE)(magic & 0xff);
+    switch(cmd) {
+        case PROTO_MAGIC_CMD_INV_NO:
+        case PROTO_MAGIC_CMD_INV_OK:
+        case PROTO_MAGIC_CMD_DATA:
+        case PROTO_MAGIC_CMD_CLOCK:
+            break;
+        default:
+            D(("proto: invalid cmd: %lx\n", cmd));
+            return PROTO_RET_ERROR_WRONG_CMD;
+    }
+
+    // check data size
+    ULONG pkt_data_size = res - sizeof(struct proto_packet);
+    if(pkt_data_size != pkt->data_size) {
+        D(("proto: wrong data size: want=%ld got=%ld\n", pkt_data_size, pkt->data_size));
+        return PROTO_RET_ERROR_WRONG_SIZE;
+    }
+
+    // setip data
+    *ret_pkt = pkt;
+    *ret_data = ph->rx_buf + sizeof(struct proto_packet);
+
+    return PROTO_RET_OK;
 }
 
-void proto_get_msg_buf(struct proto_handle *ph, UBYTE **buf, ULONG *size)
+int proto_recv_wait(struct proto_handle *ph, ULONG timeout_s, ULONG timeout_us, ULONG *sigmask)
 {
-    *size = ph->buf_extra_bytes;
-    *buf = ph->buf + 16;
-}
-
-int proto_wait_recv(struct proto_handle *ph, ULONG timeout, ULONG *sigmask)
-{
-    return udp_wait_recv(&ph->udp, ph->udp_fd, timeout, sigmask);
+    return udp_wait_recv(&ph->udp, ph->udp_fd, timeout_s, timeout_us, sigmask);
 }
