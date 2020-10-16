@@ -5,11 +5,12 @@ import argparse
 import logging
 import rtmidi
 import rtmidi.midiutil
-from miditools.udpmidi import MidiServer
+from miditools.udpmidi import MidiClient
+from miditools.proto import ProtocolError
 from miditools.portconf import MidiPortPairArray
 
 
-def main_loop(srv, ports):
+def main_loop(client, ports):
 
     # setup input handler
     for port_num, midi_in in ports.get_midi_in_ports():
@@ -18,16 +19,26 @@ def main_loop(srv, ports):
         midi_in.set_callback(cb)
         midi_in.ignore_types(sysex=False)
 
+    # connect
+    logging.info("connecting...")
+    try:
+        client.connect()
+    except ProtocolError:
+        logging.error("connection to server failed! offline?")
+        client.close()
+        return 2
+    logging.info("connected.")
+
     while(True):
         try:
             # get next message
-            pkt, port = srv.recv()
+            port, data = client.recv()
             # some stats
-            lost_pkts = srv.get_lost_pkts()
+            lost_pkts = client.get_lost_pkts()
             if lost_pkts:
                 logging.warning("lost packets: %d", lost_pkts)
             # forward
-            port_num = pkt.get_port_num()
+            port_num = port.get_port_num()
             midi_out = ports.get_midi_out(port_num)
             if not midi_out:
                 logging.warning("#%d: Port unknown!: %s", port_num, pkt)
@@ -43,6 +54,13 @@ def main_loop(srv, ports):
         except KeyboardInterrupt:
             logging.info("shutting down...")
             break
+        except ProtocolError as e:
+            logging.error("midi udp protocol failed: %s", e)
+
+    # disconnect
+    logging.info("disconnecting...")
+    client.close()
+    logging.info("disconnected.")
 
 
 def midi_in_handler(msg_time, srv, port_num):
@@ -110,14 +128,14 @@ def main():
         logging.error("No midi ports defined! Use '-p' option. Aborting...")
         return 1
 
-    # open server
-    srv = MidiServer.parse_from_str(opts.server, opts.client)
-    host_addr, peer_addr = srv.get_host_and_peer_addr()
+    # open client
+    client = MidiClient.parse_from_str(opts.server, opts.client)
+    host_addr, peer_addr = client.get_host_and_peer_addr()
     logging.info("host_addr: %s", host_addr)
     logging.info("peer_addr: %s", peer_addr)
 
     # main loop
-    return main_loop(srv, ports)
+    return main_loop(client, ports)
 
 
 if __name__ == '__main__':

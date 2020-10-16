@@ -119,8 +119,8 @@ int proto_recv_packet(struct proto_handle *ph,
     // check command
     UBYTE cmd = (UBYTE)(magic & 0xff);
     switch(cmd) {
-        case PROTO_MAGIC_CMD_INV_NO:
-        case PROTO_MAGIC_CMD_INV_OK:
+        case PROTO_MAGIC_CMD_INV:
+        case PROTO_MAGIC_CMD_EXIT:
         case PROTO_MAGIC_CMD_DATA:
         case PROTO_MAGIC_CMD_CLOCK:
             break;

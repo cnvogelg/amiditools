@@ -44,6 +44,7 @@ struct proto_packet {
 
 #define PROTO_MAGIC           0x43414d00     // CAMx
 #define PROTO_MAGIC_MASK      0xffffff00
+#define PROTO_MAGIC_CMD_MASK  0x000000ff
 #define PROTO_MAGIC_CMD_INV       0x49 // 'I'
 #define PROTO_MAGIC_CMD_INV_OK    0x4f // 'O'
 #define PROTO_MAGIC_CMD_INV_NO    0x4e // 'N'
