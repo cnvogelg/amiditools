@@ -129,9 +129,9 @@ class MidiClient:
     def disconnect(self):
         self.client.disconnect()
 
-    def recv(self, timeout=None):
+    def recv(self):
         """recv next midi packet and return port, msg"""
-        port_num, data = self.client.recv(timeout)
+        port_num, data = self.client.recv()
         port = self._ensure_port(port_num)
         return port, MidiMsg.decode(data)
 

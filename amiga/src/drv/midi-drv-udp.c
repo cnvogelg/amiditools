@@ -17,6 +17,10 @@
 #include "udp.h"
 #include "proto.h"
 
+// functions
+static void timer_set(ULONG secs, ULONG micro);
+static void timer_abort(void);
+
 /* midi driver structure */
 static struct MidiDeviceData my_dev = {
     .Magic = MDD_Magic,
@@ -34,7 +38,9 @@ static struct MidiDeviceData my_dev = {
 
 extern struct ExecBase *SysBase;
 struct Device *TimerBase;
-static struct IORequest *ior_time;
+static struct timerequest *ior_time;
+static ULONG timer_mask;
+static struct MsgPort *timer_port;
 
 // UDP config
 #define NAME_LEN 80
@@ -46,10 +52,11 @@ static struct proto_handle proto = {
 
 // peer state
 static int peer_connected;
-static struct timeval peer_last_seen;
 static ULONG peer_tx_seq_num;
 static ULONG peer_rx_seq_num;
 static struct sockaddr_in peer_addr;
+static int clock_interval = 5;
+static int peer_data_received = FALSE;
 
 /* Config Driver */
 
@@ -120,6 +127,23 @@ void midi_drv_api_tx_msg(midi_drv_msg_t *msg)
     }
 }
 
+static void handle_timer(void)
+{
+    if(!peer_connected) {
+        D(("peer: already disconnected!\n"));
+        return;
+    }
+    if(!peer_data_received) {
+        D(("peer: auto-disconnect!\n"));
+        peer_connected = FALSE;
+        peer_data_received = FALSE;
+    } else {
+        D(("peer: alive.\n"))
+        peer_data_received = FALSE;
+        timer_set(clock_interval, 0);
+    }
+}
+
 #define check_peer_addr(addr) \
     (addr->sin_addr.s_addr == peer_addr.sin_addr.s_addr)
 
@@ -154,6 +178,9 @@ static void handle_peer_invitation(struct sockaddr_in *this_peer_addr,
         peer_addr = *this_peer_addr;
         D(("midi-udp: connected: rx_seq=%08lx, tx_seq=%08lx\n",
             peer_rx_seq_num, peer_tx_seq_num));
+        // fire timer
+        timer_set(clock_interval, 0);
+        peer_data_received = FALSE;
     }
 }
 
@@ -172,6 +199,7 @@ static void handle_peer_exit(struct sockaddr_in *this_peer_addr,
     }
 
     peer_connected = FALSE;
+    timer_abort();
     D(("midi-udp: disconnected!\n"));
 }
 
@@ -194,7 +222,8 @@ static void handle_peer_clock(struct sockaddr_in *this_peer_addr,
         D(("midi-udp: tx err: %ld\n", res));
     }
 
-    D(("midi-udp: clock: %ld, %ld", pkt->time_stamp.tv_secs, pkt->time_stamp.tv_micro));
+    D(("peer clock: %ld, %ld\n", pkt->time_stamp.tv_secs, pkt->time_stamp.tv_micro));
+    D(("send clock: %ld, %ld\n", ret_pkt->time_stamp.tv_secs, ret_pkt->time_stamp.tv_micro));
 }
 
 static midi_drv_msg_t my_msg;
@@ -224,14 +253,24 @@ int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *got_mask)
     // loop until a midi message was received or a signal occurred
     // stay in the loop when other protocol messages appear
     while(1) {
-        D(("midi-udp: rx wait\n"));
-        int res = proto_recv_wait(&proto, 0, 0, got_mask);
-        D(("midi-udp: rx -> %ld\n", res));
+        ULONG my_mask = *got_mask | timer_mask;
+        D(("midi-udp: rx wait: mask=%08lx\n", my_mask));
+        int res = proto_recv_wait(&proto, 0, 0, &my_mask);
+        D(("midi-udp: rx -> %ld, mask=%08lx\n", res, my_mask));
         if(res == -1) {
             return MIDI_DRV_RET_IO_ERROR;
         }
         else if(res == 0) {
-            return MIDI_DRV_RET_OK_SIGNAL;
+            if((my_mask & timer_mask) == timer_mask) {
+                GetMsg(timer_port);
+                handle_timer();
+            }
+            // return other signal
+            if((my_mask & ~timer_mask) != 0) {
+                D(("midi-udp: rx return signal: %08lx\n", my_mask));
+                *got_mask = my_mask;
+                return MIDI_DRV_RET_OK_SIGNAL;
+            }
         }
         else {
             struct proto_packet *pkt;
@@ -239,12 +278,16 @@ int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *got_mask)
             static struct sockaddr_in pkt_peer_addr;
             int res = proto_recv_packet(&proto, &pkt_peer_addr, &pkt, &data_buf);
             if(res == 0) {
+                peer_data_received = TRUE;
                 // get packet type
                 UBYTE cmd = (UBYTE)(pkt->magic & PROTO_MAGIC_CMD_MASK);
                 D(("midi-udp: rx pkt: cmd=%02lx port=%ld seq_num=%08lx ts=%ld.%06ld size=%ld\n",
                     cmd, pkt->port, pkt->seq_num,
                     pkt->time_stamp.tv_secs, pkt->time_stamp.tv_micro,
                     pkt->data_size));
+                D(("peer: port=%ld addr=%08lx\n",
+                    pkt_peer_addr.sin_port,
+                    pkt_peer_addr.sin_addr));
                 switch(cmd) {
                     case PROTO_MAGIC_CMD_INV:
                         handle_peer_invitation(&pkt_peer_addr, pkt);
@@ -291,21 +334,23 @@ static int timer_init(void)
         return 1;
     }
 
-    ior_time = (struct IORequest *)CreateExtIO(port, sizeof(struct IORequest));
+    ior_time = (struct timerequest *)CreateExtIO(port, sizeof(struct timerequest));
     if(ior_time == NULL) {
         DeletePort(port);
         return 2;
     }
 
-    error = OpenDevice(TIMERNAME, UNIT_MICROHZ, ior_time, 0L);
+    error = OpenDevice(TIMERNAME, UNIT_MICROHZ, (struct IORequest *)ior_time, 0L);
     if(error != 0) {
-        DeleteExtIO(ior_time);
+        DeleteExtIO((struct IORequest *)ior_time);
         DeletePort(port);
         return 3;
 
     }
 
-    TimerBase = ior_time->io_Device;
+    TimerBase = ior_time->tr_node.io_Device;
+    timer_mask = 1 << port->mp_SigBit;
+    timer_port = port;
     return 0;
 }
 
@@ -317,15 +362,37 @@ static void timer_exit(void)
         return;
     }
 
-    port = ior_time->io_Message.mn_ReplyPort;
+    port = timer_port;
 
-    CloseDevice(ior_time);
-    DeleteExtIO(ior_time);
+    AbortIO((struct IORequest *)ior_time);
+    WaitIO((struct IORequest *)ior_time);
+
+    CloseDevice((struct IORequest *)ior_time);
+    DeleteExtIO((struct IORequest *)ior_time);
     DeletePort(port);
 
     TimerBase = NULL;
+    timer_port = NULL;
+    timer_mask = 0;
+    ior_time = NULL;
 }
 
+static void timer_set(ULONG secs, ULONG micro)
+{
+    ior_time->tr_node.io_Command = TR_ADDREQUEST;
+    ior_time->tr_time.tv_secs = secs;
+    ior_time->tr_time.tv_micro = micro;
+
+    SendIO((struct IORequest *)ior_time);
+    D(("timer: set secs=%ld micro=%ld mask=%08lx\n", secs, micro, timer_mask));
+}
+
+static void timer_abort(void)
+{
+    D(("timer: abort\n"));
+    AbortIO((struct IORequest *)ior_time);
+    WaitIO((struct IORequest *)ior_time);
+}
 
 int midi_drv_api_init(struct ExecBase *SysBase)
 {
@@ -341,10 +408,9 @@ int midi_drv_api_init(struct ExecBase *SysBase)
         D(("midi: proto_init failed!\n"));
         timer_exit();
         return MIDI_DRV_RET_FATAL_ERROR;
-    } else {
-        return MIDI_DRV_RET_OK;
     }
 
+    return MIDI_DRV_RET_OK;
 }
 
 void midi_drv_api_exit(void)

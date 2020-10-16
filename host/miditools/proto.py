@@ -5,6 +5,7 @@ import struct
 import socket
 import time
 import random
+import logging
 
 
 class DecoderError(Exception):
@@ -57,6 +58,9 @@ class Packet:
 
     def get_data(self):
         return self.data
+
+    def get_timestamp(self):
+        return self.ts
 
     @classmethod
     def decode(cls, data):
@@ -160,11 +164,13 @@ class Client:
         # send invitation packet
         self.tx_seq_num = random.randint(0, 0xffffffff)
         inv_pkt = Packet(Packet.CMD_INV, seq_num=self.tx_seq_num)
+        logging.debug("send inv packet")
         self.sock.sendto(inv_pkt.encode(), self.peer_addr)
 
         # wait for reply
         self.sock.settimeout(timeout)
         try:
+            logging.debug("wait for reply")
             data, got_addr = self.sock.recvfrom(self.max_pkt_size)
             if got_addr != self.peer_addr:
                 raise ProtocolError("Wrong peer in invitation!")
@@ -174,6 +180,7 @@ class Client:
 
         # check reply packet
         cmd = ret_pkt.get_cmd()
+        logging.debug("got reply: %02x", cmd)
         if cmd == Packet.CMD_INV_NO:
             raise ProtocolError("Invitation rejected!")
         elif cmd != Packet.CMD_INV_OK:
@@ -182,47 +189,86 @@ class Client:
         # connected
         self.connected = True
         self.rx_seq_num = ret_pkt.get_seq_num()
+        self.last_ts = time.monotonic()
 
     def disconnect(self):
         if not self.connected:
             raise RuntimeError("not connected!")
 
         # send exit packet
-        self.tx_seq_num += 1
-        exit_pkt = Packet(Packet.CMD_EXIT, seq_num=self.tx_seq_num)
-        self.sock.sendto(exit_pkt.encode(), self.peer_addr)
+        exit_pkt = Packet(Packet.CMD_EXIT)
+        self._send_pkt(exit_pkt)
 
         self.connected = False
 
-    def recv(self, timeout=2):
+    def _send_clock(self, now):
+        pkt = Packet(Packet.CMD_CLOCK)
+        self._send_pkt(pkt)
+        logging.debug("send clock: %r", pkt.get_timestamp())
+
+    def _recv_pkt(self, send_clock_interval, idle_time):
+        # choose a suitable timeout
+        timeout = send_clock_interval / 5
+        self.sock.settimeout(timeout)
+
+        # loop until idle time reached
+        last_ts = self.last_ts
+        last_clock = last_ts
+        while True:
+            now = time.monotonic()
+            delta = now - last_ts
+            # idle time reached - abort
+            if delta >= idle_time:
+                raise ProtocolError("server is idle for %d sec" % idle_time)
+
+            # send clock?
+            delta = now - last_clock
+            if delta >= send_clock_interval:
+                self._send_clock(now)
+                last_clock = now
+
+            try:
+                data, addr = self.sock.recvfrom(self.max_pkt_size)
+                self.last_ts = time.monotonic()
+                return data, addr
+            except socket.timeout:
+                pass
+
+    def recv(self, send_clock_interval=2, idle_time=5):
         """receive next data packet and return port_num, data"""
         if not self.connected:
             raise RuntimeError("not connected!")
 
-        data, addr = self.sock.recvfrom(self.max_pkt_size)
+        while True:
+            # receive packet and handle clock
+            data, addr = self._recv_pkt(send_clock_interval, idle_time)
 
-        # check peer addr
-        if addr != self.peer_addr:
-            raise ProtocolError("wrong peer: " + addr)
+            # check peer addr
+            if addr != self.peer_addr:
+                raise ProtocolError("wrong peer: " + addr)
 
-        # check seq num
-        pkt = Packet.decode(data)
-        self.rx_seq_num += 1
-        pkt_seq_num = pkt.get_seq_num()
-        my_seq_num = self.rx_seq_num
-        if pkt_seq_num < my_seq_num:
-            raise ProtocolError("invalid seq_num: " + pkt_seq_num)
-        elif pkt_seq_num > my_seq_num:
-            # packets lost!
-            num_lost = pkt_seq_num - my_seq_num
-            self.rx_seq_num = pkt_seq_num
-            self.lost_packets += num_lost
+            # check seq num
+            pkt = Packet.decode(data)
+            self.rx_seq_num += 1
+            pkt_seq_num = pkt.get_seq_num()
+            my_seq_num = self.rx_seq_num
+            if pkt_seq_num < my_seq_num:
+                raise ProtocolError("invalid seq_num: " + pkt_seq_num)
+            elif pkt_seq_num > my_seq_num:
+                # packets lost!
+                num_lost = pkt_seq_num - my_seq_num
+                self.rx_seq_num = pkt_seq_num
+                self.lost_packets += num_lost
 
-        # check for data
-        if pkt.get_cmd() != Packet.CMD_DATA:
-            raise ProtocolError("no data: " + pkt)
-
-        return pkt.get_port_num(), pkt.get_data()
+            # check cmd
+            cmd = pkt.get_cmd()
+            if cmd == Packet.CMD_DATA:
+                # return data
+                return pkt.get_port_num(), pkt.get_data()
+            elif cmd == Packet.CMD_CLOCK:
+                logging.debug("peer clock: %r", pkt.get_timestamp())
+            else:
+                raise ProtocolError("no data: " + pkt)
 
     def _send_pkt(self, pkt):
         """send a ProtoPacket to client at addr"""
