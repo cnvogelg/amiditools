@@ -106,16 +106,17 @@ void midi_drv_api_tx_msg(midi_drv_msg_t *msg)
 
     proto_send_prepare(&proto, &pkt, &data_buf);
 
-    pkt->magic = PROTO_MAGIC | PROTO_MAGIC_CMD_DATA;
     pkt->port = msg->port;
     pkt->seq_num = ++peer_tx_seq_num;
     GetSysTime(&pkt->time_stamp);
 
     ULONG sysex_size = msg->sysex_size;
     if(sysex_size > 0) {
+        pkt->magic = PROTO_MAGIC | PROTO_MAGIC_CMD_MIDI_SYSEX;
         CopyMem(msg->sysex_data, data_buf, sysex_size);
         pkt->data_size = sysex_size;
     } else {
+        pkt->magic = PROTO_MAGIC | PROTO_MAGIC_CMD_MIDI_MSG;
         midi_msg_t *ptr = (midi_msg_t *)data_buf;
         *ptr = msg->midi_msg;
         pkt->data_size = sizeof(midi_msg_t);
@@ -228,23 +229,47 @@ static void handle_peer_clock(struct sockaddr_in *this_peer_addr,
 
 static midi_drv_msg_t my_msg;
 
-static midi_drv_msg_t *handle_peer_data(struct sockaddr_in *this_peer_addr, 
-                                        struct proto_packet *pkt, UBYTE *data_buf)
+static midi_drv_msg_t *handle_peer_midi_msg(struct sockaddr_in *this_peer_addr, 
+                                            struct proto_packet *pkt, UBYTE *data_buf)
 {
     // check addr
     if(!check_peer_addr(this_peer_addr)) {
-        D(("midi-udp: data: peer wrong addr!\n"));
+        D(("midi-udp: midi_msg: peer wrong addr!\n"));
         return NULL;
     }
 
     // check size
     if(pkt->data_size != sizeof(midi_msg_t)) {
-        D(("midi.udp: data: wrong size!\n"));
+        D(("midi.udp: midi_msg: wrong size!\n"));
         return NULL;
     }
 
     my_msg.port = pkt->port;
     my_msg.midi_msg = *((midi_msg_t *)data_buf);
+    my_msg.sysex_data = NULL;
+    my_msg.sysex_size = 0;
+    return &my_msg;
+}
+
+static midi_drv_msg_t *handle_peer_midi_sysex(struct sockaddr_in *this_peer_addr, 
+                                              struct proto_packet *pkt, UBYTE *data_buf)
+{
+    // check addr
+    if(!check_peer_addr(this_peer_addr)) {
+        D(("midi-udp: midi sysex: peer wrong addr!\n"));
+        return NULL;
+    }
+
+    // check size
+    if(pkt->data_size < 3) {
+        D(("midi.udp: midi sysex: wrong size!\n"));
+        return NULL;
+    }
+
+    my_msg.port = pkt->port;
+    my_msg.midi_msg = *((midi_msg_t *)data_buf);
+    my_msg.sysex_data = data_buf;
+    my_msg.sysex_size = pkt->data_size;
     return &my_msg;
 }
 
@@ -298,9 +323,19 @@ int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *got_mask)
                     case PROTO_MAGIC_CMD_CLOCK:
                         handle_peer_clock(&pkt_peer_addr, pkt, data_buf);
                         break;
-                    case PROTO_MAGIC_CMD_DATA:
+                    case PROTO_MAGIC_CMD_MIDI_MSG:
                         {
-                            midi_drv_msg_t *my_msg = handle_peer_data(
+                            midi_drv_msg_t *my_msg = handle_peer_midi_msg(
+                                &pkt_peer_addr, pkt, data_buf);
+                            if(my_msg != NULL) {
+                                *msg = my_msg;
+                                return MIDI_DRV_RET_OK;
+                            }
+                        }
+                        break;
+                    case PROTO_MAGIC_CMD_MIDI_SYSEX:
+                        {
+                            midi_drv_msg_t *my_msg = handle_peer_midi_sysex(
                                 &pkt_peer_addr, pkt, data_buf);
                             if(my_msg != NULL) {
                                 *msg = my_msg;

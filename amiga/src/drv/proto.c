@@ -121,7 +121,8 @@ int proto_recv_packet(struct proto_handle *ph,
     switch(cmd) {
         case PROTO_MAGIC_CMD_INV:
         case PROTO_MAGIC_CMD_EXIT:
-        case PROTO_MAGIC_CMD_DATA:
+        case PROTO_MAGIC_CMD_MIDI_MSG:
+        case PROTO_MAGIC_CMD_MIDI_SYSEX:
         case PROTO_MAGIC_CMD_CLOCK:
             break;
         default:

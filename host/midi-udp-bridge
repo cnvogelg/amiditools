@@ -32,7 +32,7 @@ def main_loop(client, ports):
     while(True):
         try:
             # get next message
-            port, data = client.recv()
+            port, data, is_sysex = client.recv()
             # some stats
             lost_pkts = client.get_lost_pkts()
             if lost_pkts:
@@ -41,15 +41,13 @@ def main_loop(client, ports):
             port_num = port.get_port_num()
             midi_out = ports.get_midi_out(port_num)
             if not midi_out:
-                logging.warning("#%d: Port unknown!: %s", port_num, pkt)
-            elif pkt.is_sysex():
-                sysex = pkt.get_sysex()
-                logging.debug("#%d: RX(sysex): %s -> %s", port_num, pkt, sysex)
-                midi_out.send_message(sysex)
+                logging.warning("#%d: Port unknown!", port_num)
+            elif is_sysex:
+                logging.debug("#%d: RX(sysex): %s", port_num, data)
+                midi_out.send_message(data)
             else:
-                msg = pkt.get_msg()
-                tup = msg.get_tuple()
-                logging.debug("#%d: RX: %s -> %s", port_num, pkt, tup)
+                tup = data.get_tuple()
+                logging.debug("#%d: RX(msg): %s", port_num, tup)
                 midi_out.send_message(tup)
         except KeyboardInterrupt:
             logging.info("shutting down...")
@@ -69,10 +67,10 @@ def midi_in_handler(msg_time, client, port_num):
     # is sysex?
     if raw_msg[0] == 0xf0:
         sysex = bytes(raw_msg)
-        pkt = srv.send_sysex(port_num, sysex)
+        pkt = client.send_sysex(port_num, sysex)
         logging.debug("#%d: TX(sysex): %s -> %s", port_num, sysex, pkt)
     else:
-        pkt = srv.send_raw_msg(port_num, raw_msg)
+        pkt = client.send_raw_msg(port_num, raw_msg)
         logging.debug("#%d: TX: %s -> %s", port_num, raw_msg, pkt)
 
 

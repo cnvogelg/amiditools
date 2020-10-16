@@ -26,7 +26,8 @@ class Packet:
     CMD_INV_OK = 0x4f
     CMD_INV_NO = 0x4e
     CMD_EXIT = 0x45
-    CMD_DATA = 0x44
+    CMD_MIDI_MSG = 0x4d
+    CMD_MIDI_SYSEX = 0x53
     CMD_CLOCK = 0x43
 
     """The Packet is stored in an UDP frame."""
@@ -83,7 +84,7 @@ class Packet:
 
         # extract data
         if n > 24:
-            pkt_data = data[:24]
+            pkt_data = data[24:]
         else:
             pkt_data = None
 
@@ -235,7 +236,7 @@ class Client:
                 pass
 
     def recv(self, send_clock_interval=2, idle_time=5):
-        """receive next data packet and return port_num, data"""
+        """receive next data packet and return port_num, data, sysex"""
         if not self.connected:
             raise RuntimeError("not connected!")
 
@@ -262,9 +263,12 @@ class Client:
 
             # check cmd
             cmd = pkt.get_cmd()
-            if cmd == Packet.CMD_DATA:
-                # return data
-                return pkt.get_port_num(), pkt.get_data()
+            if cmd == Packet.CMD_MIDI_MSG:
+                # return midi msg
+                return pkt.get_port_num(), pkt.get_data(), False
+            elif cmd == Packet.CMD_MIDI_SYSEX:
+                # return midi sysex
+                return pkt.get_port_num(), pkt.get_data(), True
             elif cmd == Packet.CMD_CLOCK:
                 logging.debug("peer clock: %r", pkt.get_timestamp())
             else:
@@ -284,8 +288,12 @@ class Client:
         self.sock.sendto(data, self.peer_addr)
         return pkt
 
-    def send(self, port_num, data):
-        pkt = Packet(Packet.CMD_DATA, port=port_num, data=data)
+    def send_msg(self, port_num, data):
+        pkt = Packet(Packet.CMD_MIDI_MSG, port=port_num, data=data)
+        return self._send_pkt(pkt)
+
+    def send_sysex(self, port_num, data):
+        pkt = Packet(Packet.CMD_MIDI_SYSEX, port=port_num, data=data)
         return self._send_pkt(pkt)
 
     def close(self):

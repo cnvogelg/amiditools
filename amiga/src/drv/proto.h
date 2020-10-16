@@ -45,12 +45,13 @@ struct proto_packet {
 #define PROTO_MAGIC           0x43414d00     // CAMx
 #define PROTO_MAGIC_MASK      0xffffff00
 #define PROTO_MAGIC_CMD_MASK  0x000000ff
-#define PROTO_MAGIC_CMD_INV       0x49 // 'I'
-#define PROTO_MAGIC_CMD_INV_OK    0x4f // 'O'
-#define PROTO_MAGIC_CMD_INV_NO    0x4e // 'N'
-#define PROTO_MAGIC_CMD_EXIT      0x45 // 'E'
-#define PROTO_MAGIC_CMD_DATA      0x44 // 'D'
-#define PROTO_MAGIC_CMD_CLOCK     0x43 // 'C'
+#define PROTO_MAGIC_CMD_INV         0x49 // 'I'
+#define PROTO_MAGIC_CMD_INV_OK      0x4f // 'O'
+#define PROTO_MAGIC_CMD_INV_NO      0x4e // 'N'
+#define PROTO_MAGIC_CMD_EXIT        0x45 // 'E'
+#define PROTO_MAGIC_CMD_MIDI_MSG    0x4d // 'M'
+#define PROTO_MAGIC_CMD_MIDI_SYSEX  0x53 // 'S'
+#define PROTO_MAGIC_CMD_CLOCK       0x43 // 'C'
 
 extern int proto_init(struct proto_handle *ph, struct ExecBase *sysBase, ULONG data_max_size);
 extern void proto_exit(struct proto_handle *ph);

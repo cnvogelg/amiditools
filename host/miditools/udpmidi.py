@@ -2,6 +2,7 @@
 
 
 import struct
+import logging
 
 import miditools.proto as proto
 
@@ -130,20 +131,23 @@ class MidiClient:
         self.client.disconnect()
 
     def recv(self):
-        """recv next midi packet and return port, msg"""
-        port_num, data = self.client.recv()
+        """recv next midi packet and return port, msg_or_sysex, is_sysex"""
+        port_num, data, is_sysex = self.client.recv()
         port = self._ensure_port(port_num)
-        return port, MidiMsg.decode(data)
+        if is_sysex:
+            return port, data, True
+        else:
+            return port, MidiMsg.decode(data), False
 
     def send_msg(self, port_num, msg):
-        return self.client.send(port_num, msg.encode())
+        return self.client.send_msg(port_num, msg.encode())
 
     def send_raw_msg(self, port_num, raw_msg):
         msg = MidiMsg(raw_msg)
         return self.send_msg(port_num, msg)
 
     def send_sysex(self, port_num, sysex):
-        return self.client.send(port_num, sysex)
+        return self.client.send_sysex(port_num, sysex)
 
     def close(self):
         self.client.close()

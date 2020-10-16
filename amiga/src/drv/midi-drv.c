@@ -44,6 +44,9 @@ struct port_data {
     APTR user_data;
     struct midi_parser_handle parser;
     struct SignalSemaphore sem_port;
+    
+    struct Task *task;
+    BYTE task_sig;
 };
 struct port_data ports[MIDI_DRV_NUM_PORTS];
 
@@ -134,6 +137,7 @@ static void port_xmit(int portnum)
             midi_drv_api_tx_msg(&dmsg);
         }
     }
+    Signal(pd->task, 1 << pd->task_sig);
     ReleaseSemaphore(&pd->sem_port);
 }
 
@@ -242,13 +246,13 @@ SAVEDS static void task_main(void)
     worker_sig = AllocSignal(-1);
     if(worker_sig == -1) {
         D(("midi task: no worker_sig!\n"));
-        Signal(main_task, main_sig);
+        Signal(main_task, 1 << main_sig);
         return;
     }
 
     if(midi_drv_api_init(SysBase) != 0) {
         D(("midi task: proto_init failed!\n"));
-        Signal(main_task, main_sig);
+        Signal(main_task, 1 << main_sig);
         FreeSignal(worker_sig);
         return;
     }
@@ -257,7 +261,7 @@ SAVEDS static void task_main(void)
 
     // report back that init is done
     D(("midi task: Init done.\n"));
-    Signal(main_task, main_sig);
+    Signal(main_task, 1 << main_sig);
 
     // enter main loop
     main_loop();
@@ -270,7 +274,7 @@ SAVEDS static void task_main(void)
     FreeSignal(worker_sig);
 
     // report back that we are done
-    Signal(main_task, main_sig);
+    Signal(main_task, 1 << main_sig);
 }
 
 /* Driver Functions */
@@ -309,7 +313,7 @@ SAVEDS BOOL ASM midi_drv_init(REG(a6, APTR sysbase))
     }
 
     // wait for worker init status
-    Wait(main_sig);
+    Wait(1 << main_sig);
 
     D(("midi: Init done: status=%ld\n", (ULONG)worker_status));
     return worker_status;
@@ -321,7 +325,7 @@ SAVEDS ASM void midi_drv_expunge(void)
 
     // signal end and wait for shutdown
     Signal(worker_task, SIGBREAKF_CTRL_C);
-    Wait(main_sig);
+    Wait(1 << main_sig);
 
     FreeSignal(main_sig);
 
@@ -343,12 +347,15 @@ SAVEDS ASM struct MidiPortData *midi_drv_open_port(
             D(("midi: parser_init failed!\n"));
             return NULL;
         }
-        ObtainSemaphore(&ports[portnum].sem_port);
-        ports[portnum].tx_func = tx_func;
-        ports[portnum].rx_func = rx_func;
-        ports[portnum].user_data = user_data;
-        ReleaseSemaphore(&ports[portnum].sem_port);
-        return &ports[portnum].port_data;
+        struct port_data *port = &ports[portnum];
+        ObtainSemaphore(&port->sem_port);
+        port->tx_func = tx_func;
+        port->rx_func = rx_func;
+        port->user_data = user_data;
+        port->task = FindTask(NULL);
+        port->task_sig = AllocSignal(-1);
+        ReleaseSemaphore(&port->sem_port);
+        return &port->port_data;
     } else {
         return NULL;
     }
@@ -361,11 +368,13 @@ SAVEDS ASM void midi_drv_close_port(
 {
     D(("midi: ClosePort(%ld)\n", portnum));
     if(portnum < MIDI_DRV_NUM_PORTS) {
-        ObtainSemaphore(&ports[portnum].sem_port);
-        ports[portnum].tx_func = NULL;
-        ports[portnum].rx_func = NULL;
-        ReleaseSemaphore(&ports[portnum].sem_port);
-        midi_parser_exit(&ports[portnum].parser);
+        struct port_data *port = &ports[portnum];
+        ObtainSemaphore(&port->sem_port);
+        port->tx_func = NULL;
+        port->rx_func = NULL;
+        FreeSignal(port->task_sig);
+        ReleaseSemaphore(&port->sem_port);
+        midi_parser_exit(&port->parser);
     }
 }
 
@@ -375,5 +384,8 @@ static SAVEDS ASM void ActivateXmit(REG(a2, APTR userdata),REG(d0, LONG portnum)
     ObtainSemaphore(&sem_mask);
     activate_portmask |= 1 << portnum;
     ReleaseSemaphore(&sem_mask);
-    Signal(worker_task, 1 << worker_sig); 
+    Signal(worker_task, 1 << worker_sig);
+    D(("midi: wait..."));
+    Wait(1 << ports[portnum].task_sig);
+    D(("midi: ActivateXMit done\n"));
 }
