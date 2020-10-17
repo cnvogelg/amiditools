@@ -1,20 +1,90 @@
 #!/usr/bin/env python3
 
-from miditools.udpmidi import MidiServer
+import sys
+import logging
+import argparse
 
-with MidiServer() as srv:
-    print("midi-udp-echo: waiting for data on {}".format(srv))
+from miditools.udpmidi import MidiClient
+from miditools.proto import ProtocolError
+
+
+def main_loop(client):
+    # connect
+    logging.info("connecting...")
+    try:
+        client.connect()
+    except ProtocolError as e:
+        logging.error("connection to server failed! %s", e)
+        client.close()
+        return 2
+    logging.info("connected.")
+
     while(True):
-        # get next message
-        pkt, port = srv.recv()
-        # some stats
-        port_num = port.get_port_num()
-        print(port_num, ": recv from", srv.get_peer_addr(), ":", pkt)
-        lost_pkts = srv.get_lost_pkts()
-        if lost_pkts:
-            print(port_num, ": lost packets:", lost_pkts)
-        # echo reply
-        if pkt.is_sysex():
-            port.send_sysex(pkt.get_sysex())
-        else:
-            port.send_msg(pkt.get_msg())
+        try:
+            # get next message
+            port, data, is_sysex = client.recv()
+            # some stats
+            lost_pkts = client.get_lost_pkts()
+            if lost_pkts:
+                logging.warning("lost packets: %d", lost_pkts)
+            # echo back
+            port_num = port.get_port_num()
+            if is_sysex:
+                logging.info("#%d: ECHO(sysex): %s", port_num, data)
+                client.send_sysex(port_num, data)
+            else:
+                logging.info("#%d: ECHO(msg): %s", port_num, data)
+                client.send_msg(port_num, data)
+        except KeyboardInterrupt:
+            logging.info("shutting down...")
+            break
+        except ProtocolError as e:
+            logging.error("midi udp protocol failed: %s", e)
+            break
+
+    # disconnect
+    logging.info("disconnecting...")
+    client.close()
+    logging.info("disconnected.")
+
+
+DESC = "echo reply all data received via Midi UDP"
+LOG_FORMAT = '%(asctime)-8s.%(msecs)03d   %(levelname)-7s  %(message)s'
+TIME_FORMAT = "%H:%M:%S"
+
+
+def main():
+    # parse args
+    parser = argparse.ArgumentParser(description=DESC)
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help="verbose output")
+    parser.add_argument('-d', '--debug', action='store_true',
+                        help="enabled debug output")
+    parser.add_argument('-s', '--server',
+                        help="host addr of UDP server. default=localhost:6820",
+                        default="localhost")
+    parser.add_argument('-c', '--client',
+                        help="host addr of UDP client. default=localhost:6821",
+                        default="localhost")
+    opts = parser.parse_args()
+
+    # setup logging
+    level = logging.WARNING
+    if opts.debug:
+        level = logging.DEBUG
+    elif opts.verbose:
+        level = logging.INFO
+    logging.basicConfig(level=level, format=LOG_FORMAT, datefmt=TIME_FORMAT)
+
+    # open client
+    client = MidiClient.parse_from_str(opts.server, opts.client)
+    host_addr, peer_addr = client.get_host_and_peer_addr()
+    logging.info("host_addr: %s", host_addr)
+    logging.info("peer_addr: %s", peer_addr)
+
+    # main loop
+    return main_loop(client)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
