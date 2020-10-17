@@ -42,7 +42,7 @@ int midi_open(struct MidiSetup *ms)
     ms->node = CreateMidi(MIDI_MsgQueue, 2048L,
                 MIDI_SysExSize, ms->sysex_max_size,
                 MIDI_RecvSignal, ms->rx_sig,
-                MIDI_Name, "midi-echo",
+                MIDI_Name, ms->midi_name,
                 TAG_END);
     if(ms->node == NULL) {
         PutStr("Error creating midi node!\n");

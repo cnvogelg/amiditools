@@ -7,6 +7,7 @@ struct MidiSetup {
     /* input */
     char            *rx_name;
     char            *tx_name;
+    char            *midi_name;
     ULONG            sysex_max_size;
     /* state */
     struct MidiNode *node;

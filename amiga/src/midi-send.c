@@ -513,6 +513,7 @@ static int cmd_dev(int num_args, char **args)
 
     /* midi open */
     midi_setup.tx_name = *args;
+    midi_setup.midi_name = "midi-send";
     if(verbose)
         Printf("opening midi device: %s\n", *args);
     int res = midi_open(&midi_setup);

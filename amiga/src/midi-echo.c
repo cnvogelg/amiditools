@@ -49,6 +49,7 @@ int main(int argc, char **argv)
     /* midi open */
     ms.tx_name = params.out_cluster;
     ms.rx_name = params.in_cluster;
+    ms.midi_name = "midi-echo";
     ms.sysex_max_size = sysex_max_size;
     int res = midi_open(&ms);
     if(res != 0) {

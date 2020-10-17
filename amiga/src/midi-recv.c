@@ -708,6 +708,7 @@ static int cmd_dev(int num_args, char **args)
 
     /* midi open */
     midi_setup.rx_name = *args;
+    midi_setup.midi_name = "midi-recv";
     if(verbose)
         Printf("opening midi device: %s\n", *args);
     int res = midi_open(&midi_setup);
