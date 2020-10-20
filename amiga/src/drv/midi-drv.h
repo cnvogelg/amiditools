@@ -27,7 +27,7 @@ typedef struct midi_drv_msg midi_drv_msg_t;
 typedef ULONG (* ASM midi_drv_tx_func_t)(REG(a2, APTR) userdata);
 typedef void (* ASM midi_drv_rx_func_t)(REG(d0, UWORD input), REG(a2, APTR userdata));
 
-SAVEDS BOOL ASM midi_drv_init(REG(a6, APTR sysbase));
+SAVEDS BOOL ASM midi_drv_init(void);
 SAVEDS void ASM midi_drv_expunge(void);
 SAVEDS ASM struct MidiPortData *midi_drv_open_port(
         REG(a3, struct MidiDeviceData *data),

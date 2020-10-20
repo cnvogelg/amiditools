@@ -20,7 +20,7 @@ static struct MidiDeviceData my_dev = {
     .IDString = "Echo driver",
     .Version = 0,
     .Revision = 1,
-    .Init = (APTR)midi_drv_init,
+    .Init = midi_drv_init,
     .Expunge = midi_drv_expunge,
     .OpenPort = midi_drv_open_port,
     .ClosePort = midi_drv_close_port,
@@ -92,7 +92,7 @@ int  midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *wait_got_mask)
     ULONG ret_mask = Wait(wait_mask);
 
     // got a message?
-    if(ret_mask & port_mask) {
+    if((ret_mask & port_mask) == port_mask) {
         struct MidiMessage *mm = (struct MidiMessage *)GetMsg(port);
         if(mm != NULL) {
             *msg = &mm->drv_msg;
@@ -120,7 +120,6 @@ int midi_drv_api_init(struct ExecBase *SysBase)
         D(("no echo port!\n"));
         return MIDI_DRV_RET_MEMORY_ERROR;
     }
-
     return MIDI_DRV_RET_OK;
 }
 

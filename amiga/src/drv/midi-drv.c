@@ -15,7 +15,34 @@
 #include "midi-parser.h"
 #include "midi-drv.h"
 
-static SAVEDS ASM void ActivateXmit(REG(a2, APTR userdata),REG(d0, LONG portnum));
+SAVEDS ASM void midi_drv_xmit(REG(d0, LONG portnum));
+
+typedef void (*xmit_func_t)(void);
+
+#define XMIT_FUNC_DEF(portnum) \
+    static void midi_drv_activate ## portnum (void) { midi_drv_xmit(portnum); }
+#define XMIT_FUNC(portnum) \
+    midi_drv_activate ## portnum
+
+XMIT_FUNC_DEF(0)
+XMIT_FUNC_DEF(1)
+XMIT_FUNC_DEF(2)
+XMIT_FUNC_DEF(3)
+XMIT_FUNC_DEF(4)
+XMIT_FUNC_DEF(5)
+XMIT_FUNC_DEF(6)
+XMIT_FUNC_DEF(7)
+
+static xmit_func_t xmit_funcs[] = {
+    XMIT_FUNC(0),
+    XMIT_FUNC(1),
+    XMIT_FUNC(2),
+    XMIT_FUNC(3),
+    XMIT_FUNC(4),
+    XMIT_FUNC(5),
+    XMIT_FUNC(6),
+    XMIT_FUNC(7)
+};
 
 int main()
 {
@@ -30,7 +57,7 @@ static struct Task *worker_task;
 static BYTE main_sig;
 static BYTE worker_sig;
 static BOOL worker_status;
-static int activate_portmask;
+static volatile ULONG activate_portmask;
 static struct SignalSemaphore sem_mask;
 
 // driver config
@@ -59,33 +86,26 @@ int midi_drv_config(char *cfg_file, char *arg_template,
 
     D(("config init:\n"));
 
-    /* only need DOS for config */
-    if(DOSBase = (struct DosLibrary *)OpenLibrary ("dos.library",36)) {
-        D(("dosbase %08lx  file %s\n", DOSBase, cfg_file));
-        /* try to read config */
-        if(cfginput = Open(cfg_file, MODE_OLDFILE)) {
-            D(("opened cfg file: '%s'\n", cfg_file));
-            oldinput = SelectInput(cfginput);
-            rda = ReadArgs(arg_template, (LONG *)param, NULL);
-            if(rda != NULL) {
-                D(("got args\n"));
-                func(param);
-                FreeArgs(rda);
-            } else {
-                D(("failed parsing args!\n"));
-                result = MIDI_DRV_RET_PARSE_ERROR;
-            }
-            D(("close cfg\n"));
-            Close(cfginput);
-            SelectInput(oldinput);
+    D(("dosbase %08lx  file %s\n", DOSBase, cfg_file));
+    /* try to read config */
+    if(cfginput = Open(cfg_file, MODE_OLDFILE)) {
+        D(("opened cfg file: '%s'\n", cfg_file));
+        oldinput = SelectInput(cfginput);
+        rda = ReadArgs(arg_template, (LONG *)param, NULL);
+        if(rda != NULL) {
+            D(("got args\n"));
+            func(param);
+            FreeArgs(rda);
         } else {
-            D(("cfg file not found: '%s'\n", cfg_file));
-            result = MIDI_DRV_RET_FILE_NOT_FOUND;
+            D(("failed parsing args!\n"));
+            result = MIDI_DRV_RET_PARSE_ERROR;
         }
-        CloseLibrary((struct Library *)DOSBase);
+        D(("close cfg\n"));
+        Close(cfginput);
+        SelectInput(oldinput);
     } else {
-        D(("no DOS!\n"));
-        result = MIDI_DRV_RET_FATAL_ERROR;
+        D(("cfg file not found: '%s'\n", cfg_file));
+        result = MIDI_DRV_RET_FILE_NOT_FOUND;
     }
     return result;
 }
@@ -275,20 +295,28 @@ SAVEDS static void task_main(void)
 
 /* Driver Functions */
 
-SAVEDS BOOL ASM midi_drv_init(REG(a6, APTR sysbase))
+SAVEDS BOOL ASM midi_drv_init(void)
 {
-    D(("midi: Init\n"));
-    SysBase = sysbase;
+    SysBase = *(struct ExecBase **)4;
+    D(("midi: Init: Sysbase=%lx\n", SysBase));
     
+    // open dos
+    DOSBase = (struct DosLibrary *)OpenLibrary ("dos.library",36);
+    if(DOSBase == NULL) {
+        D(("midi: no dos??\n"));
+        return FALSE;
+    }
+       
     STRPTR name = midi_drv_api_config();
 
     InitSemaphore(&sem_mask);
+    D(("acti: %lx\n", &activate_portmask));
 
     // init ports
     for(int i=0;i<MIDI_DRV_NUM_PORTS;i++) {
         ports[i].tx_func = NULL;
         ports[i].rx_func = NULL;
-        ports[i].port_data.ActivateXmit = ActivateXmit;
+        ports[i].port_data.ActivateXmit = xmit_funcs[i];
         InitSemaphore(&ports[i].sem_port);
     }
 
@@ -307,6 +335,7 @@ SAVEDS BOOL ASM midi_drv_init(REG(a6, APTR sysbase))
         D(("midi: create task failed!\n"));
         return FALSE;
     }
+    D(("worker task: %lx\n", worker_task));
 
     // wait for worker init status
     Wait(1 << main_sig);
@@ -324,6 +353,8 @@ SAVEDS ASM void midi_drv_expunge(void)
     Wait(1 << main_sig);
 
     FreeSignal(main_sig);
+
+    CloseLibrary((struct Library *)DOSBase);
 
     D(("midi: Expunge done\n"));
 }
@@ -349,6 +380,7 @@ SAVEDS ASM struct MidiPortData *midi_drv_open_port(
         port->rx_func = rx_func;
         port->user_data = user_data;
         ReleaseSemaphore(&port->sem_port);
+        D(("midi: OpenPort(%ld): done user data=%lx\n", portnum, user_data));
         return &port->port_data;
     } else {
         return NULL;
@@ -365,7 +397,7 @@ static void wait_for_idle(LONG portnum)
             D(("midi: is idle\n"));
             break;
         }
-        D(("midi: wait for idle\n"));
+        D(("midi: wait for idle(%ld): %lx\n", portnum, mask));
         Delay(1);
     }
 }
@@ -385,13 +417,17 @@ SAVEDS ASM void midi_drv_close_port(
         ReleaseSemaphore(&port->sem_port);
         midi_parser_exit(&port->parser);
     }
+    D(("midi: ClosePort(%ld): done\n", portnum));
 }
 
-static SAVEDS ASM void ActivateXmit(REG(a2, APTR userdata),REG(d0, LONG portnum))
+SAVEDS ASM void midi_drv_xmit(REG(d0, LONG portnum))
 {
-    D(("midi: ActivateXMit(%ld): task=%lx\n", portnum, FindTask(NULL)));
-    ObtainSemaphore(&sem_mask);
-    activate_portmask |= 1 << portnum;
-    ReleaseSemaphore(&sem_mask);
-    Signal(worker_task, 1 << worker_sig);
+    D(("midi: ActivateXMit(%ld): task=%lx mask=%lx\n", portnum, FindTask(NULL), &activate_portmask));
+    if(portnum < MIDI_DRV_NUM_PORTS) {
+        ObtainSemaphore(&sem_mask);
+        activate_portmask |= 1 << portnum;
+        ReleaseSemaphore(&sem_mask);
+        Signal(worker_task, 1 << worker_sig);
+    }
+    D(("midi: ActivateXMit(%ld): done\n", portnum));
 }
