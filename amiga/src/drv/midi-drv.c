@@ -71,6 +71,9 @@ struct port_data {
     APTR user_data;
     struct midi_parser_handle parser;
     struct SignalSemaphore sem_port;
+
+    struct Task *end_task;
+    BYTE end_sig;
 };
 struct port_data ports[MIDI_DRV_NUM_PORTS];
 
@@ -198,6 +201,18 @@ static void port_recv(midi_drv_msg_t *msg)
     }
 }
 
+static void notify_end_task(int portnum, struct port_data *port)
+{
+    struct Task *end_task = port->end_task;
+    if(end_task != NULL) {
+        BYTE end_sig = port->end_sig;
+        ULONG end_mask = 1 << end_sig;
+        D(("midi: notify end port=%ld task=%lx mask=%lx\n", portnum, end_task, end_mask));
+        Signal(end_task, end_mask);
+        port->end_task = NULL;
+    }
+}
+
 static void main_loop(void)
 {
     D(("midi: main loop\n"));
@@ -231,6 +246,7 @@ static void main_loop(void)
                 for(int i=0;i<MIDI_DRV_NUM_PORTS;i++) {
                     if(mask & (1<<i)) {
                         port_xmit(i);
+                        notify_end_task(i, &ports[i]);
                     }
                 }
 
@@ -317,6 +333,7 @@ SAVEDS BOOL ASM midi_drv_init(void)
         ports[i].tx_func = NULL;
         ports[i].rx_func = NULL;
         ports[i].port_data.ActivateXmit = xmit_funcs[i];
+        ports[i].end_task = NULL;
         InitSemaphore(&ports[i].sem_port);
     }
 
@@ -389,16 +406,28 @@ SAVEDS ASM struct MidiPortData *midi_drv_open_port(
 
 static void wait_for_idle(LONG portnum)
 {
-    while(1) {
-        ObtainSemaphore(&sem_mask);
-        ULONG mask = activate_portmask;
+    ObtainSemaphore(&sem_mask);
+    // quick check if its already idle
+    ULONG mask = activate_portmask;
+    if((mask & (1 << portnum)) == 0) {
         ReleaseSemaphore(&sem_mask);
-        if((mask & (1 << portnum)) == 0) {
-            D(("midi: is idle\n"));
-            break;
+        D(("midi: is idle\n"));
+    } else {
+        // we have to wait
+        struct port_data *port = &ports[portnum];
+        port->end_task = FindTask(NULL);
+        port->end_sig = AllocSignal(-1);
+        if(port->end_sig == -1) {
+            D(("midi: FATAL no sig for idle wait!\n"));
+            return;
         }
-        D(("midi: wait for idle(%ld): %lx\n", portnum, mask));
-        Delay(1);
+        ReleaseSemaphore(&sem_mask);
+
+        ULONG wait_mask = 1 << port->end_sig;
+        D(("midi: wait for idle: task=%lx mask=%lx\n", port->end_task, wait_mask));
+        Wait(wait_mask);
+        D(("midi: now is idle\n"));
+        FreeSignal(port->end_sig);
     }
 }
 

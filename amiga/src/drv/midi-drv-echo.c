@@ -59,6 +59,9 @@ static struct MidiMessage *createMsg(midi_drv_msg_t *drv_msg)
         CopyMem(buf, new_buf, size);
         mm->drv_msg.sysex_data = new_buf;
         mm->drv_msg.sysex_size = size;
+    } else {
+        mm->drv_msg.sysex_data = NULL;
+        mm->drv_msg.sysex_size = 0;
     }
 
     return mm;
