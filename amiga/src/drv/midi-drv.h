@@ -6,7 +6,6 @@
 
 // ok status
 #define MIDI_DRV_RET_OK                 0
-#define MIDI_DRV_RET_OK_SIGNAL          1
 // error status
 #define MIDI_DRV_RET_PARSE_ERROR        1
 #define MIDI_DRV_RET_FILE_NOT_FOUND     2

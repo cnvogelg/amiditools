@@ -282,22 +282,19 @@ int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *got_mask)
         D(("midi-udp: rx wait: mask=%08lx\n", my_mask));
         int res = proto_recv_wait(&proto, 0, 0, &my_mask);
         D(("midi-udp: rx -> %ld, mask=%08lx\n", res, my_mask));
+        *got_mask = my_mask;
         if(res == -1) {
             return MIDI_DRV_RET_IO_ERROR;
         }
-        else if(res == 0) {
-            if((my_mask & timer_mask) == timer_mask) {
-                GetMsg(timer_port);
-                handle_timer();
-            }
-            // return other signal
-            if((my_mask & ~timer_mask) != 0) {
-                D(("midi-udp: rx return signal: %08lx\n", my_mask));
-                *got_mask = my_mask;
-                return MIDI_DRV_RET_OK_SIGNAL;
-            }
+
+        // timer?
+        if((my_mask & timer_mask) == timer_mask) {
+            GetMsg(timer_port);
+            handle_timer();
         }
-        else {
+
+        // got data?
+        if(res > 0) {
             struct proto_packet *pkt;
             UBYTE *data_buf;
             static struct sockaddr_in pkt_peer_addr;
@@ -352,6 +349,7 @@ int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *got_mask)
             }
         }
     }
+    return MIDI_DRV_RET_OK;
 }
 
 void midi_drv_api_rx_msg_done(midi_drv_msg_t *msg)

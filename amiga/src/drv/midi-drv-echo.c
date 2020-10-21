@@ -88,11 +88,21 @@ void midi_drv_api_tx_msg(midi_drv_msg_t *msg)
     }
 }
 
-int  midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *wait_got_mask)
+int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *wait_got_mask)
 {
+    // already messages on port?
+    struct MidiMessage *mm = (struct MidiMessage *)GetMsg(port);
+    if(mm != NULL) {
+        *msg = &mm->drv_msg;
+        D(("rx: quick midi msg: %lx\n", mm));
+        *wait_got_mask = 0;
+        return MIDI_DRV_RET_OK;
+    }
+
     ULONG port_mask = 1<<port->mp_SigBit;
     ULONG wait_mask = port_mask | *wait_got_mask;
     ULONG ret_mask = Wait(wait_mask);
+    *wait_got_mask = ret_mask;
 
     // got a message?
     if((ret_mask & port_mask) == port_mask) {
@@ -101,12 +111,8 @@ int  midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *wait_got_mask)
             *msg = &mm->drv_msg;
         }
         D(("rx: got midi msg: %lx\n", mm));
-        return MIDI_DRV_RET_OK;
     }
-
-    // return other signal
-    *wait_got_mask = ret_mask;
-    return MIDI_DRV_RET_OK_SIGNAL;
+    return MIDI_DRV_RET_OK;
 }
 
 void midi_drv_api_rx_msg_done(midi_drv_msg_t *msg)

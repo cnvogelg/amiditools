@@ -213,6 +213,26 @@ static void notify_end_task(int portnum, struct port_data *port)
     }
 }
 
+static void do_transmit(void)
+{
+    ULONG mask;
+    
+    // fetch current mask
+    ObtainSemaphore(&sem_mask);
+    mask = activate_portmask;
+
+    D(("midi: activate port mask: %08lx\n", mask));
+    for(int i=0;i<MIDI_DRV_NUM_PORTS;i++) {
+        if(mask & (1<<i)) {
+            port_xmit(i);
+            notify_end_task(i, &ports[i]);
+        }
+    }
+
+    activate_portmask = 0;
+    ReleaseSemaphore(&sem_mask);
+}
+
 static void main_loop(void)
 {
     D(("midi: main loop\n"));
@@ -226,45 +246,24 @@ static void main_loop(void)
         // block and get next message or return with signal
         int res = midi_drv_api_rx_msg(&msg, &got_sig);
         D(("midi: rx_msg res=%ld, mask=%08lx\n", res, got_sig));
-
-        // own signal was received
-        if(res == MIDI_DRV_RET_OK_SIGNAL) {
-            // shutdown
-            if((got_sig & SIGBREAKF_CTRL_C) == SIGBREAKF_CTRL_C) {
-                break;
-            }
-
-            // activate port for transmit
-            if((got_sig & worker_sigmask) == worker_sigmask) {
-                ULONG mask;
-                
-                // fetch current mask
-                ObtainSemaphore(&sem_mask);
-                mask = activate_portmask;
-
-                D(("midi: activate port mask: %08lx\n", mask));
-                for(int i=0;i<MIDI_DRV_NUM_PORTS;i++) {
-                    if(mask & (1<<i)) {
-                        port_xmit(i);
-                        notify_end_task(i, &ports[i]);
-                    }
-                }
-
-                activate_portmask = 0;
-                ReleaseSemaphore(&sem_mask);
-            }
-        }
-        else if(res == MIDI_DRV_RET_OK) {
-            if(msg != NULL) { 
-                port_recv(msg);
-                midi_drv_api_rx_msg_done(msg);
-            }
-        }
-        // some error
-        else {
-            D(("midi: abort worker: error=%ld\n", res));
+        if(res != MIDI_DRV_RET_OK) {
             break;
+        }
 
+        // always handle signals first
+        // shutdown
+        if((got_sig & SIGBREAKF_CTRL_C) == SIGBREAKF_CTRL_C) {
+            break;
+        }
+        // tx transmit
+        if((got_sig & worker_sigmask) == worker_sigmask) {
+            do_transmit();
+        }
+
+        // a message was received (rx)
+        if(msg != NULL) { 
+            port_recv(msg);
+            midi_drv_api_rx_msg_done(msg);
         }
     }
 }

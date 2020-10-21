@@ -93,6 +93,10 @@ $(eval $(call build-app,midi-send,$(MIDI_SEND_SRCS)))
 MIDI_RECV_SRCS=midi-recv.c midi-tools.c midi-setup.c cmd.c
 $(eval $(call build-app,midi-recv,$(MIDI_RECV_SRCS)))
 
+# midi-perf
+MIDI_PERF_SRCS=midi-perf.c midi-tools.c midi-setup.c cmd.c debug.c
+$(eval $(call build-app,midi-perf,$(MIDI_PERF_SRCS)))
+
 # common midi driver sources
 MIDI_DRV_SRCS=midi-drv.c debug.c midi-parser.c
 
