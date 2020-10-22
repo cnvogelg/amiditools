@@ -3,6 +3,8 @@
 
 #include <devices/timer.h>
 
+extern struct Device *TimerBase;
+
 /* mode */
 extern void midi_tools_set_hex_mode(int on);
 extern int  midi_tools_get_hex_mode(void);

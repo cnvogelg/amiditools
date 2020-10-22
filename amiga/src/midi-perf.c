@@ -4,6 +4,7 @@
 #include <proto/dos.h>
 #include <proto/camd.h>
 #include <proto/alib.h>
+#include <proto/timer.h>
 
 #include <midi/camd.h>
 #include <midi/mididefs.h>
@@ -13,17 +14,22 @@
 #include "midi-setup.h"
 #include "midi-tools.h"
 
+static int task_setup(void);
+static void task_shutdown(void);
+
 static const char *TEMPLATE = 
     "V/VERBOSE/S,"
     "SMS/SYSEXMAXSIZE/K/N,"
     "OUTDEV/A,"
     "INDEV/A,"
+    "DELAY/K/N,"
     "NUM/K/N";
 typedef struct {
     LONG *verbose;
     ULONG *sysex_max_size;
     char *out_dev;
     char *in_dev;
+    ULONG *delay;
     ULONG *num_msgs;
 } params_t;
 
@@ -43,27 +49,175 @@ static struct Task *main_task;
 static struct Task *worker_task;
 
 // perf
-static ULONG num_msgs = 32;
-static ULONG got_msgs;
-
 typedef union {
-    LONG  cmd;
+    LONG  l;
     UBYTE b[4];
 } MidiCmd;
 
+typedef struct {
+    MidiCmd    cmd;
+    struct timeval  ts_send;
+    struct timeval  ts_recv;
+    ULONG           delta_us;
+} Sample;
+
+typedef struct {
+    ULONG       min;
+    ULONG       max;
+    ULONG       avg;
+    ULONG       num;
+} Statistics;
+
+static ULONG loop_delay = 50;
+static ULONG num_msgs = 256;
+static ULONG got_msgs;
+static ULONG num_errors;
+static Sample *samples;
+
+
+static Sample *create_samples_note_sweep(void)
+{
+    // sanity check
+    if(num_msgs > 256) {
+        num_msgs = 256;
+    }
+    if((num_msgs % 2)==1) {
+        num_msgs ++;
+    }
+
+    ULONG num_notes = num_msgs >> 1;
+    Sample *samples = (Sample *)AllocVec(num_msgs * sizeof(Sample), MEMF_ANY | MEMF_CLEAR);
+    if(samples == NULL) {
+        return NULL;
+    }
+
+    Sample *smp= samples;
+    for(ULONG i=0;i<num_notes;i++) {
+        smp->cmd.mm_Status = 0x90;
+        smp->cmd.mm_Data1 = i;
+        smp->cmd.mm_Data2 = 10;
+        smp++;
+        smp->cmd.mm_Status = 0x80;
+        smp->cmd.mm_Data1 = i;
+        smp->cmd.mm_Data2 = 10;
+        smp++;
+    }
+
+    return samples;
+}
+
+static void free_samples(Sample *samples)
+{
+    FreeVec(samples);
+}
+
+static void calc_sample_delta(Sample *samples, ULONG num)
+{
+    Sample *smp = samples;
+    for(ULONG i=0;i<num;i++) {
+        struct timeval delta = smp->ts_recv;
+        SubTime(&delta, &smp->ts_send);
+
+        // limit to micros
+        smp->delta_us = delta.tv_micro;
+        if(delta.tv_secs > 0) {
+            smp->delta_us += delta.tv_secs * 1000000UL;
+        }
+        smp++;
+    }
+}
+
+static void calc_sample_stats(Sample *samples, ULONG num_msgs, Statistics *stats)
+{
+    ULONG min = 0xffffffff;
+    ULONG max = 0;
+    ULONG sum = 0;
+    ULONG num = 0;
+
+    Sample *smp = samples;
+    for(ULONG i=0;i<num_msgs;i++) {
+        ULONG delta = smp->delta_us;
+        if(delta < min) {
+            min = delta;
+        }
+        if(delta > max) {
+            max = delta;
+        }
+        sum += delta;
+        num++;
+        smp++;
+    }
+
+    stats->min = min;
+    stats->max = max;
+    stats->num = num;
+    if(num > 0) {
+        stats->avg = sum / num;
+    } else {
+        stats->avg = 0;
+    }
+}
+
+static int benchmark_samples(Sample *samples, ULONG num_samples)
+{
+    if(verbose)
+        Printf("sending %ld samples...\n", num_samples);
+    Sample *smp = samples;
+    for(int i=0;i<num_samples;i++) {
+        GetSysTime(&smp->ts_send);
+        PutMidi(midi_setup_tx.tx_link, smp->cmd.l);
+        smp++;
+    }
+    if(verbose)
+        PutStr("waiting for incoming samples...\n");
+    ULONG mask = Wait((1 << main_sig) | SIGBREAKF_CTRL_C);
+    if((mask & SIGBREAKF_CTRL_C) == SIGBREAKF_CTRL_C) {
+        return 2;
+    }
+    if(verbose)
+        Printf("got samples: %ld, errors: %ld\n", num_samples, num_errors);
+    if(num_errors > 0) {
+        PutStr("Failed with errors...\n");
+        return 1;
+    }
+
+    calc_sample_delta(samples, num_msgs);
+    Statistics stats;
+    calc_sample_stats(samples, num_msgs, &stats);
+    Printf("min=%6ld, max=%6ld, avg=%6ld  (#%ld)\n",
+        stats.min, stats.max, stats.avg, stats.num);
+
+    return 0;
+}
+
 static void main_loop(void)
 {
-    PutStr("sending samples...\n");
-    for(int i=0;i<num_msgs;i++) {
-        MidiCmd msg;
-        msg.mm_Status = 0x90;
-        msg.mm_Data1 = i;
-        msg.mm_Data2 = 10;
-        PutMidi(midi_setup_tx.tx_link, msg.cmd);
+    // create samples
+    samples = create_samples_note_sweep();
+    if(samples == NULL) {
+        PutStr("Error creating samples!\n");
+        return;
     }
-    PutStr("waiting for rx\n");
-    Wait(1 << main_sig);
-    Printf("got msgs: %ld\n", got_msgs);
+
+    // setup worker
+    if(task_setup()!=0) {
+        PutStr("Error setting up worker!\n");
+        free_samples(samples);
+        return;
+    }
+
+    while(1) {
+        int result = benchmark_samples(samples, num_msgs);
+        if(result != 0) {
+            PutStr("stopping...\n");
+            break;
+        }
+
+        Delay(loop_delay);
+    }
+
+    task_shutdown();
+    free_samples(samples);
 } 
 
 static void worker_loop(void)
@@ -72,9 +226,10 @@ static void worker_loop(void)
     ULONG midi_mask = 1 << midi_setup_rx.rx_sig;
     ULONG sig_mask = SIGBREAKF_CTRL_C | midi_mask;
     BOOL stay = TRUE;
+    Sample *smp = samples;
     while(stay) {
         ULONG got_sig = Wait(sig_mask);
-        D(("got sig: %lx\n", got_sig));
+        //D(("got sig: %lx\n", got_sig));
         if((got_sig & SIGBREAKF_CTRL_C) == SIGBREAKF_CTRL_C) {
             break;
         }
@@ -83,10 +238,24 @@ static void worker_loop(void)
             // get midi messages
             MidiMsg msg;
             while(GetMidi(midi_setup_rx.node, &msg)) {
-                D(("#%ld ----- RX: %08ld: %08lx\n", got_msgs, msg.mm_Time, msg.mm_Msg));
+                GetSysTime(&smp->ts_recv);
+                //D(("#%ld RX: %08lx: %08lx\n", got_msgs, msg.mm_Time, msg.mm_Msg));
+                // check message
+                if(msg.l[0] != smp->cmd.l) {
+                    D(("wanted: %08lx\n", smp->cmd.l));
+                    num_errors++;
+                    Signal(main_task, 1 << main_sig);
+                    break;
+                }
                 got_msgs ++;
+                smp++;
+                // all done report back
                 if(got_msgs == num_msgs) {
-                    stay = FALSE;
+                    Signal(main_task, 1 << main_sig);
+                    // reset
+                    D(("worker: reset\n"));
+                    smp = samples;
+                    got_msgs = 0;
                     break;
                 }
             }
@@ -124,10 +293,9 @@ SAVEDS static void task_main(void)
 
     midi_close(&midi_setup_rx);
 
-    // report back that we are done
-    Signal(main_task, 1 << main_sig);
-
     D(("task: done\n"));
+
+    Signal(main_task, 1 << main_sig);
 }
 
 static int task_setup(void)
@@ -161,6 +329,8 @@ static int task_setup(void)
 static void task_shutdown(void)
 {
     D(("exit: task shutdown...\n"));
+    Signal(worker_task, SIGBREAKF_CTRL_C);
+    Wait(1 << main_sig);
     FreeSignal(main_sig);
 }
 
@@ -174,23 +344,29 @@ int main(int argc, char **argv)
     if(DOSBase != NULL) {
         UtilityBase = (struct UtilityBase *)OpenLibrary("utility.library", 0);
         if(UtilityBase != NULL) {
-            /* First parse args */
-            args = ReadArgs(TEMPLATE, (LONG *)&params, NULL);
-            if(args == NULL) {
-                PrintFault(IoErr(), "Args Error");
-            } else {
+            if(midi_tools_init_time()==0) {
+                /* First parse args */
+                args = ReadArgs(TEMPLATE, (LONG *)&params, NULL);
+                if(args == NULL) {
+                    PrintFault(IoErr(), "Args Error");
+                } else {
 
-                if(params.verbose != NULL) {
-                    verbose = TRUE;
-                }
+                    if(params.verbose != NULL) {
+                        verbose = TRUE;
+                    }
 
-                if(task_setup() == 0) {
                     /* max size for sysex */
                     if(params.sysex_max_size != NULL) {
                         sysex_max_size = *params.sysex_max_size;
                     }
                     if(params.num_msgs != NULL) {
                         num_msgs = *params.num_msgs;
+                    }
+                    if(params.verbose != NULL) {
+                        verbose = TRUE;
+                    }
+                    if(params.delay != NULL) {
+                        loop_delay = *params.delay;
                     }
 
                     /* setup midi */
@@ -206,9 +382,9 @@ int main(int argc, char **argv)
                     }
                     midi_close(&midi_setup_tx);
 
-                    task_shutdown();
                     result = RETURN_OK;
                 }
+                midi_tools_exit_time();
             }
             CloseLibrary((struct Library *)UtilityBase);
         }
