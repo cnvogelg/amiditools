@@ -125,6 +125,8 @@ void midi_drv_api_tx_msg(midi_drv_msg_t *msg)
     int res = proto_send_packet(&proto, &peer_addr);
     if(res != 0) {
         D(("midi-udp: tx err: %ld\n", res));
+    } else {
+        D(("midi-udp: tx OK\n"));
     }
 }
 
@@ -277,8 +279,9 @@ int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *got_mask)
 {
     // loop until a midi message was received or a signal occurred
     // stay in the loop when other protocol messages appear
+    ULONG start_mask = *got_mask;
     while(1) {
-        ULONG my_mask = *got_mask | timer_mask;
+        ULONG my_mask = start_mask | timer_mask;
         D(("midi-udp: rx wait: mask=%08lx\n", my_mask));
         int res = proto_recv_wait(&proto, 0, 0, &my_mask);
         D(("midi-udp: rx -> %ld, mask=%08lx\n", res, my_mask));
@@ -348,6 +351,13 @@ int midi_drv_api_rx_msg(midi_drv_msg_t **msg, ULONG *got_mask)
                 return MIDI_DRV_RET_IO_ERROR;
             }
         }
+
+        // more signals? leave loop
+        if((my_mask & start_mask) != 0) {
+            D(("midi-udp: rx -> other signal: %lx\n", my_mask));
+            return MIDI_DRV_RET_OK;
+        }
+
     }
     return MIDI_DRV_RET_OK;
 }
