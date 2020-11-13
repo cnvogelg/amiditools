@@ -1,0 +1,26 @@
+CAMD_PORT = 0
+CAMD_NAME = echo
+IN_TOOL = camd_$(CAMD_NAME)_in_$(CAMD_PORT)
+OUT_TOOL = camd_$(CAMD_NAME)_out_$(CAMD_PORT)
+TOOLSTART_OBJ = bin/toolstart.o
+
+tools: $(IN_TOOL).ptool $(OUT_TOOL).ptool
+
+$(IN_TOOL).o:     camdin.c midiinw.c
+	sc $*.c objectname $@ define CAMD_NAME="$(CAMD_NAME)" define CAMD_PORT="$(CAMD_PORT)"
+
+$(OUT_TOOL).o:    camdout.c midiinw.c
+	sc $*.c objectname $@ define CAMD_NAME="$(CAMD_NAME)" define CAMD_PORT="$(CAMD_PORT)"
+
+$(IN_TOOL).ptool: $(IN_TOOL).o $(TOOLSTART_OBJ)
+
+$(OUT_TOOL).ptool: $(OUT_TOOL).o $(TOOLSTART_OBJ)
+
+clean:
+	delete *.o
+
+.c.o:
+    sc $*.c
+
+.o.ptool:
+    slink with link.with to $@ from $(TOOLSTART_OBJ) $<
