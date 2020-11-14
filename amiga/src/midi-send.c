@@ -16,8 +16,8 @@
 static int handle_file(char *file_name);
 
 static const char *TEMPLATE = 
-    "V/VERBOSE/S,"
-    "SMS/SYSEXMAXSIZE/K/N,"
+    "V=VERBOSE/S,"
+    "SMS=SYSEXMAXSIZE/K/N,"
     "CMDS/M";
 typedef struct {
     LONG *verbose;
