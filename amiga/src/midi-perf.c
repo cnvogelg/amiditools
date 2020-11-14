@@ -73,8 +73,7 @@ typedef struct {
 static ULONG loop_delay = 1; // in seconds
 static ULONG sample_delay = 1000; // in us
 static ULONG num_msgs = 256;
-static ULONG got_msgs;
-static ULONG num_errors;
+static ULONG num_lost;
 static Sample *samples;
 
 
@@ -109,6 +108,15 @@ static Sample *create_samples_note_sweep(void)
     return samples;
 }
 
+static void reset_samples(Sample *samples)
+{
+    Sample *smp= samples;
+    for(ULONG i=0;i<num_msgs;i++) {
+        smp->ts_recv.tv_secs = 0;
+        smp->ts_recv.tv_micro = 0;
+    }
+}
+
 static void free_samples(Sample *samples)
 {
     FreeVec(samples);
@@ -119,12 +127,17 @@ static void calc_sample_delta(Sample *samples, ULONG num)
     Sample *smp = samples;
     for(ULONG i=0;i<num;i++) {
         struct timeval delta = smp->ts_recv;
-        SubTime(&delta, &smp->ts_send);
+        // valid sample rx time?
+        if((delta.tv_secs > 0) && (delta.tv_micro > 0)) {
+            SubTime(&delta, &smp->ts_send);
 
-        // limit to micros
-        smp->delta_us = delta.tv_micro;
-        if(delta.tv_secs > 0) {
-            smp->delta_us += delta.tv_secs * 1000000UL;
+            // limit to micros
+            smp->delta_us = delta.tv_micro;
+            if(delta.tv_secs > 0) {
+                smp->delta_us += delta.tv_secs * 1000000UL;
+            }
+        } else {
+            smp->delta_us = 0;
         }
         smp++;
     }
@@ -140,14 +153,16 @@ static void calc_sample_stats(Sample *samples, ULONG num_msgs, Statistics *stats
     Sample *smp = samples;
     for(ULONG i=0;i<num_msgs;i++) {
         ULONG delta = smp->delta_us;
-        if(delta < min) {
-            min = delta;
+        if(delta > 0) {
+            if(delta < min) {
+                min = delta;
+            }
+            if(delta > max) {
+                max = delta;
+            }
+            sum += delta;
+            num++;
         }
-        if(delta > max) {
-            max = delta;
-        }
-        sum += delta;
-        num++;
         smp++;
     }
 
@@ -165,6 +180,9 @@ static int benchmark_samples(Sample *samples, ULONG num_samples)
 {
     if(verbose)
         Printf("sending %ld samples...\n", num_samples);
+
+    reset_samples(samples);
+    
     Sample *smp = samples;
     for(int i=0;i<num_samples;i++) {
         GetSysTime(&smp->ts_send);
@@ -181,9 +199,9 @@ static int benchmark_samples(Sample *samples, ULONG num_samples)
         return 2;
     }
     if(verbose)
-        Printf("got samples: %ld, errors: %ld\n", num_samples, num_errors);
-    if(num_errors > 0) {
-        PutStr("Failed with errors...\n");
+        Printf("got samples: %ld, lost: %ld\n", num_samples, num_lost);
+    if(num_lost == num_samples) {
+        PutStr("All samples lost... aborting!\n");
         return 1;
     }
 
@@ -234,6 +252,8 @@ static void worker_loop(void)
     ULONG midi_mask = 1 << midi_setup_rx.rx_sig;
     ULONG sig_mask = SIGBREAKF_CTRL_C | midi_mask;
     BOOL stay = TRUE;
+    ULONG got_msgs = 0;
+    ULONG my_lost = 0;
     Sample *smp = samples;
     while(stay) {
         ULONG got_sig = Wait(sig_mask);
@@ -248,23 +268,33 @@ static void worker_loop(void)
             while(GetMidi(midi_setup_rx.node, &msg)) {
                 GetSysTime(&smp->ts_recv);
                 //D(("#%ld RX: %08lx: %08lx\n", got_msgs, msg.mm_Time, msg.mm_Msg));
-                // check message
-                if(msg.l[0] != smp->cmd.l) {
+
+                // search msg
+                while(got_msgs < num_msgs) {
+                    // check message
+                    if(msg.l[0] == smp->cmd.l) {
+                        //D(("match: %08lx\n", msg.l[0]))
+                        got_msgs++;
+                        smp++;
+                        break;
+                    }
+                    // wrong sample... try next
                     D(("wanted: %08lx got: %08lx\n", smp->cmd.l, msg.l[0]));
-                    num_errors++;
-                    Signal(main_task, 1 << main_sig);
-                    break;
+                    got_msgs++;
+                    smp++;
+                    my_lost++;
                 }
-                got_msgs ++;
-                smp++;
                 // all done report back
                 if(got_msgs == num_msgs) {
+                    num_lost = my_lost
+                    D(("worker: done: lost=%ld\n", num_lost))
                     Signal(main_task, 1 << main_sig);
-                    // reset
+
+                    // reset worker for next round
                     D(("worker: reset\n"));
                     smp = samples;
                     got_msgs = 0;
-                    num_errors = 0;
+                    my_lost = 0;
                     break;
                 }
             }
