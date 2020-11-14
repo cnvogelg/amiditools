@@ -24,5 +24,6 @@ extern int midi_tools_init_time(void);
 extern void midi_tools_get_time(struct timeval *tv);
 extern void midi_tools_print_time(struct timeval *tv);
 extern void midi_tools_exit_time(void);
+extern void midi_tools_wait_time(ULONG secs, ULONG micro);
 
 #endif

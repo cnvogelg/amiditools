@@ -239,7 +239,7 @@ void midi_tools_print_note(char *buf, UBYTE note, int use_sharps, int add_octave
 /* ----- time stuff ----- */
 
 struct Device *TimerBase;
-static struct IORequest *ior_time;
+static struct timerequest *ior_time;
 static struct timeval start_time;
 
 int midi_tools_init_time(void)
@@ -252,21 +252,21 @@ int midi_tools_init_time(void)
         return 1;
     }
 
-    ior_time = (struct IORequest *)CreateExtIO(port, sizeof(struct IORequest));
+    ior_time = (struct timerequest *)CreateExtIO(port, sizeof(struct timerequest));
     if(ior_time == NULL) {
         DeletePort(port);
         return 2;
     }
 
-    error = OpenDevice(TIMERNAME, UNIT_MICROHZ, ior_time, 0L);
+    error = OpenDevice(TIMERNAME, UNIT_MICROHZ, (struct IORequest *)ior_time, 0L);
     if(error != 0) {
-        DeleteExtIO(ior_time);
+        DeleteExtIO((struct IORequest *)ior_time);
         DeletePort(port);
         return 3;
 
     }
 
-    TimerBase = ior_time->io_Device;
+    TimerBase = ior_time->tr_node.io_Device;
 
     GetSysTime(&start_time);
 
@@ -281,10 +281,10 @@ void midi_tools_exit_time(void)
         return;
     }
 
-    port = ior_time->io_Message.mn_ReplyPort;
+    port = ior_time->tr_node.io_Message.mn_ReplyPort;
 
-    CloseDevice(ior_time);
-    DeleteExtIO(ior_time);
+    CloseDevice((struct IORequest *)ior_time);
+    DeleteExtIO((struct IORequest *)ior_time);
     DeletePort(port);
 
     TimerBase = NULL;
@@ -311,4 +311,13 @@ void midi_tools_print_time(struct timeval *tv)
     ULONG us = tv->tv_micro;
     ULONG ms = us / 1000;
     Printf("%02ld:%02ld:%02ld.%03ld", hours, mins, secs, ms);
+}
+
+void midi_tools_wait_time(ULONG secs, ULONG micro)
+{
+    ior_time->tr_node.io_Command = TR_ADDREQUEST;
+    ior_time->tr_time.tv_secs = secs;
+    ior_time->tr_time.tv_micro = micro;
+
+    DoIO((struct IORequest *)ior_time);
 }

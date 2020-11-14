@@ -18,18 +18,20 @@ static int task_setup(void);
 static void task_shutdown(void);
 
 static const char *TEMPLATE = 
-    "V/VERBOSE/S,"
-    "SMS/SYSEXMAXSIZE/K/N,"
+    "V=VERBOSE/S,"
+    "SMS=SYSEXMAXSIZE/K/N,"
     "OUTDEV/A,"
     "INDEV/A,"
-    "DELAY/K/N,"
+    "LD=LOOPDELAY/K/N,"
+    "SD=SAMPLEDELAY/K/N,"
     "NUM/K/N";
 typedef struct {
     LONG *verbose;
     ULONG *sysex_max_size;
     char *out_dev;
     char *in_dev;
-    ULONG *delay;
+    ULONG *loop_delay;
+    ULONG *sample_delay;
     ULONG *num_msgs;
 } params_t;
 
@@ -68,7 +70,8 @@ typedef struct {
     ULONG       num;
 } Statistics;
 
-static ULONG loop_delay = 50;
+static ULONG loop_delay = 1; // in seconds
+static ULONG sample_delay = 1000; // in us
 static ULONG num_msgs = 256;
 static ULONG got_msgs;
 static ULONG num_errors;
@@ -167,6 +170,9 @@ static int benchmark_samples(Sample *samples, ULONG num_samples)
         GetSysTime(&smp->ts_send);
         PutMidi(midi_setup_tx.tx_link, smp->cmd.l);
         smp++;
+        if(sample_delay > 0) {
+            midi_tools_wait_time(0, sample_delay);
+        }
     }
     if(verbose)
         PutStr("waiting for incoming samples...\n");
@@ -213,7 +219,9 @@ static void main_loop(void)
             break;
         }
 
-        Delay(loop_delay);
+        if(loop_delay > 0) {
+            midi_tools_wait_time(loop_delay, 0);
+        }
     }
 
     task_shutdown();
@@ -242,7 +250,7 @@ static void worker_loop(void)
                 //D(("#%ld RX: %08lx: %08lx\n", got_msgs, msg.mm_Time, msg.mm_Msg));
                 // check message
                 if(msg.l[0] != smp->cmd.l) {
-                    D(("wanted: %08lx\n", smp->cmd.l));
+                    D(("wanted: %08lx got: %08lx\n", smp->cmd.l, msg.l[0]));
                     num_errors++;
                     Signal(main_task, 1 << main_sig);
                     break;
@@ -256,6 +264,7 @@ static void worker_loop(void)
                     D(("worker: reset\n"));
                     smp = samples;
                     got_msgs = 0;
+                    num_errors = 0;
                     break;
                 }
             }
@@ -365,8 +374,11 @@ int main(int argc, char **argv)
                     if(params.verbose != NULL) {
                         verbose = TRUE;
                     }
-                    if(params.delay != NULL) {
-                        loop_delay = *params.delay;
+                    if(params.loop_delay != NULL) {
+                        loop_delay = *params.loop_delay;
+                    }
+                    if(params.sample_delay != NULL) {
+                        sample_delay = *params.sample_delay;
                     }
 
                     /* setup midi */
