@@ -94,7 +94,7 @@ int udp_send(struct udp_handle *uh, int sock_fd, struct sockaddr_in *peer_addr,
 int udp_recv(struct udp_handle *uh, int sock_fd, struct sockaddr_in *ret_peer_addr,
               void *buffer, ULONG len)
 {
-  socklen_t addr_len;
+  socklen_t addr_len = sizeof(struct sockaddr_in);
   int num = recvfrom(sock_fd, buffer, len, 0,
                      (struct sockaddr *)ret_peer_addr, &addr_len);
   if(num < 0) {

@@ -64,8 +64,8 @@ def main():
                         help="host addr of UDP server. default=localhost:6820",
                         default="localhost")
     parser.add_argument('-c', '--client',
-                        help="host addr of UDP client. default=localhost:6821",
-                        default="localhost")
+                        help="host addr of UDP client. default=0.0.0.0:6821",
+                        default="0.0.0.0")
     opts = parser.parse_args()
 
     # setup logging
@@ -77,7 +77,7 @@ def main():
     logging.basicConfig(level=level, format=LOG_FORMAT, datefmt=TIME_FORMAT)
 
     # open client
-    client = MidiClient.parse_from_str(opts.server, opts.client)
+    client = MidiClient.parse_from_str(opts.client, opts.server)
     host_addr, peer_addr = client.get_host_and_peer_addr()
     logging.info("host_addr: %s", host_addr)
     logging.info("peer_addr: %s", peer_addr)
