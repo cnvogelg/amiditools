@@ -29,26 +29,28 @@ def main_loop(client, ports):
         return 2
     logging.info("connected.")
 
+    last_lost = 0
     while(True):
         try:
             # get next message
             port, data, is_sysex = client.recv()
             # some stats
             lost_pkts = client.get_lost_pkts()
-            if lost_pkts:
+            if lost_pkts != last_lost:
                 logging.warning("lost packets: %d", lost_pkts)
+                last_lost = lost_pkts
             # forward
             port_num = port.get_port_num()
             midi_out = ports.get_midi_out(port_num)
-            if not midi_out:
-                logging.warning("#%d: Port unknown!", port_num)
-            elif is_sysex:
+            if is_sysex:
                 logging.debug("#%d: RX(sysex): %s", port_num, data)
-                midi_out.send_message(data)
+                if midi_out:
+                    midi_out.send_message(data)
             else:
                 tup = data.get_tuple()
                 logging.debug("#%d: RX(msg): %s", port_num, tup)
-                midi_out.send_message(tup)
+                if midi_out:
+                    midi_out.send_message(tup)
         except KeyboardInterrupt:
             logging.info("shutting down...")
             break
@@ -124,8 +126,7 @@ def main():
 
     num_ports = ports.get_num_ports()
     if num_ports == 0:
-        logging.error("No midi ports defined! Use '-p' option. Aborting...")
-        return 1
+        logging.warning("No midi ports defined! Use '-p' option. Dummy mode...")
 
     # open client
     client = MidiClient.parse_from_str(opts.client, opts.server)

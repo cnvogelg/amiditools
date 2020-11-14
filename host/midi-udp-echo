@@ -19,14 +19,16 @@ def main_loop(client):
         return 2
     logging.info("connected.")
 
+    last_lost = 0
     while(True):
         try:
             # get next message
             port, data, is_sysex = client.recv()
             # some stats
             lost_pkts = client.get_lost_pkts()
-            if lost_pkts:
+            if lost_pkts != last_lost:
                 logging.warning("lost packets: %d", lost_pkts)
+                last_lost = lost_pkts
             # echo back
             port_num = port.get_port_num()
             if is_sysex:

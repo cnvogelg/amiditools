@@ -190,7 +190,8 @@ class Client:
         # connected
         self.connected = True
         self.rx_seq_num = ret_pkt.get_seq_num()
-        self.last_ts = time.monotonic()
+        self.last_rx_ts = time.monotonic()
+        self.last_clock_ts = self.last_rx_ts
 
     def disconnect(self):
         if not self.connected:
@@ -213,24 +214,25 @@ class Client:
         self.sock.settimeout(timeout)
 
         # loop until idle time reached
-        last_ts = self.last_ts
-        last_clock = last_ts
+        last_rx_ts = self.last_rx_ts
+        last_clock_ts = self.last_clock_ts
         while True:
             now = time.monotonic()
-            delta = now - last_ts
+            delta = now - last_rx_ts
             # idle time reached - abort
             if delta >= idle_time:
                 raise ProtocolError("server is idle for %d sec" % idle_time)
 
             # send clock?
-            delta = now - last_clock
+            delta = now - last_clock_ts
             if delta >= send_clock_interval:
                 self._send_clock(now)
-                last_clock = now
+                last_clock_ts = now
 
             try:
                 data, addr = self.sock.recvfrom(self.max_pkt_size)
-                self.last_ts = time.monotonic()
+                self.last_rx_ts = time.monotonic()
+                self.last_clock_ts = last_clock_ts
                 return data, addr
             except socket.timeout:
                 pass
