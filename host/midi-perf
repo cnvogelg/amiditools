@@ -9,8 +9,8 @@ import statistics
 import rtmidi
 import rtmidi.midiutil
 
-from miditools.perf import PerfBurst, SampleGenerator
-from miditools.portconf import MidiPortPairArray
+from amiditools.perf import PerfBurst, SampleGenerator
+from amiditools.portconf import MidiPortPairArray
 
 
 def analyse_latencies(latencies):

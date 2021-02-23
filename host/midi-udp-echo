@@ -4,8 +4,8 @@ import sys
 import logging
 import argparse
 
-from miditools.udpmidi import MidiClient
-from miditools.proto import ProtocolError
+from amiditools.udpmidi import MidiClient
+from amiditools.proto import ProtocolError
 
 
 def main_loop(client):

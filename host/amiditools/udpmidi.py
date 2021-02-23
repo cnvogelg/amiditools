@@ -4,7 +4,7 @@
 import struct
 import logging
 
-import miditools.proto as proto
+import amiditools.proto as proto
 
 
 class InvalidPortError(Exception):

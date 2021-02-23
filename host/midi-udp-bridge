@@ -5,9 +5,9 @@ import argparse
 import logging
 import rtmidi
 import rtmidi.midiutil
-from miditools.udpmidi import MidiClient
-from miditools.proto import ProtocolError
-from miditools.portconf import MidiPortPairArray
+from amiditools.udpmidi import MidiClient
+from amiditools.proto import ProtocolError
+from amiditools.portconf import MidiPortPairArray
 
 
 def main_loop(client, ports):
