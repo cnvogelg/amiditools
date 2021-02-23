@@ -238,7 +238,7 @@ void midi_tools_print_note(char *buf, UBYTE note, int use_sharps, int add_octave
 
 /* ----- time stuff ----- */
 
-struct Device *TimerBase;
+struct Library *TimerBase;
 static struct timerequest *ior_time;
 static struct timeval start_time;
 
@@ -266,7 +266,7 @@ int midi_tools_init_time(void)
 
     }
 
-    TimerBase = ior_time->tr_node.io_Device;
+    TimerBase = (struct Library *)ior_time->tr_node.io_Device;
 
     GetSysTime(&start_time);
 

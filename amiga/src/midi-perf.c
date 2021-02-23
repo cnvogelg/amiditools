@@ -286,8 +286,8 @@ static void worker_loop(void)
                 }
                 // all done report back
                 if(got_msgs == num_msgs) {
-                    num_lost = my_lost
-                    D(("worker: done: lost=%ld\n", num_lost))
+                    num_lost = my_lost;
+                    D(("worker: done: lost=%ld\n", num_lost));
                     Signal(main_task, 1 << main_sig);
 
                     // reset worker for next round

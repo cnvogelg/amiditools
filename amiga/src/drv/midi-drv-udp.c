@@ -37,7 +37,7 @@ static struct MidiDeviceData my_dev = {
 };
 
 extern struct ExecBase *SysBase;
-struct Device *TimerBase;
+struct Library *TimerBase;
 static struct timerequest *ior_time;
 static ULONG timer_mask;
 static struct MsgPort *timer_port;
@@ -391,7 +391,7 @@ static int timer_init(void)
 
     }
 
-    TimerBase = ior_time->tr_node.io_Device;
+    TimerBase = (struct Library *)ior_time->tr_node.io_Device;
     timer_mask = 1 << port->mp_SigBit;
     timer_port = port;
     return 0;

@@ -1,9 +1,8 @@
 #ifndef MIDI_TOOLS_H
 #define MIDI_TOOLS_H
 
+#include <proto/timer.h>
 #include <devices/timer.h>
-
-extern struct Device *TimerBase;
 
 /* mode */
 extern void midi_tools_set_hex_mode(int on);
