@@ -1,10 +1,10 @@
-.PHONY: build init
+.PHONY: dist init clean
 
-build:
+dist:
 	python3 -m build
 
 init:
 	python3 -m pip install --upgrade build
 
-clean:
+dist-clean:
 	rm -rf build dist *.egg-info

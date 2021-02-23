@@ -1,6 +1,7 @@
 # build Amiga tools with vbcc/vasm/vlink
 
 FLAVOR?=debug
+VERSION?=1.0.0
 
 CC=vc +aos68km
 
@@ -29,6 +30,7 @@ BIN_DIR=$(BUILD_DIR)/$(FLAVOR)
 OBJ_DIR=$(BUILD_DIR)/$(FLAVOR)/obj
 DIST_BASE_DIR=dist
 DIST_DIR=$(DIST_BASE_DIR)/$(FLAVOR)
+DIST_ARCHIVE=$(DIST_BASE_DIR)/amiditools-$(VERSION).lha
 INSTALL_DIR=$(HOME)/amiga/shared
 
 HIDE?=@
@@ -143,8 +145,14 @@ clean-all:
 
 dist-flavor: init $(DIST_DIR) $(DIST_FILES)
 
-dist:
+.PHONY: dist
+
+dist: $(DIST_ARCHIVE)
+dist-clean: clean-all
+
+$(DIST_ARCHIVE):
 	@$(MAKE) dist-flavor
 	@$(MAKE) dist-flavor FLAVOR=release
+	@lha a $@ dist/debug dist/release README.md
 
 .PHONY: dist
