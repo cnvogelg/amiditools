@@ -3,7 +3,7 @@
  */
 
 #include <proto/exec.h>
-#include <proto/alib.h>
+#include <clib/alib_protos.h>
 #include <midi/camddevices.h>
 #include <midi/camd.h>
 #include <midi/mididefs.h>
@@ -46,7 +46,7 @@ static struct MidiMessage *createMsg(midi_drv_msg_t *drv_msg)
     mm->drv_msg.port = drv_msg->port;
     mm->drv_msg.midi_msg = drv_msg->midi_msg;
     mm->drv_msg.priv_data = mm;
-    
+
     // clone sysex
     ULONG size = drv_msg->sysex_size;
     UBYTE *buf = drv_msg->sysex_data;

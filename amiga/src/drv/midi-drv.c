@@ -4,7 +4,7 @@
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-#include <proto/alib.h>
+#include <clib/alib_protos.h>
 #include <midi/camddevices.h>
 #include <midi/camd.h>
 #include <midi/mididefs.h>
@@ -119,7 +119,7 @@ static void port_xmit(int portnum)
 {
     D(("port xmit %ld\n", portnum));
     struct port_data *pd = &ports[portnum];
-    
+
     ObtainSemaphore(&pd->sem_port);
     while(1) {
         // port was closed
@@ -164,9 +164,9 @@ static void port_recv(midi_drv_msg_t *msg)
 {
     if(msg->port < MIDI_DRV_NUM_PORTS) {
         struct port_data *pd = &ports[msg->port];
-        
+
         ObtainSemaphore(&pd->sem_port);
-        
+
         // port was closed?
         if(pd->rx_func == NULL) {
             D(("RX: closed...\n"));
@@ -216,7 +216,7 @@ static void notify_end_task(int portnum, struct port_data *port)
 static void do_transmit(void)
 {
     ULONG mask;
-    
+
     // fetch current mask
     ObtainSemaphore(&sem_mask);
     mask = activate_portmask;
@@ -236,7 +236,7 @@ static void do_transmit(void)
 static void main_loop(void)
 {
     D(("midi: main loop\n"));
-    
+
     // main loop
     ULONG worker_sigmask = 1 << worker_sig;
     D(("midi: worker mask=%08lx\n", worker_sigmask));
@@ -261,7 +261,7 @@ static void main_loop(void)
         }
 
         // a message was received (rx)
-        if(msg != NULL) { 
+        if(msg != NULL) {
             port_recv(msg);
             midi_drv_api_rx_msg_done(msg);
         }
@@ -314,14 +314,14 @@ SAVEDS BOOL ASM midi_drv_init(void)
 {
     SysBase = *(struct ExecBase **)4;
     D(("midi: Init: Sysbase=%lx\n", SysBase));
-    
+
     // open dos
     DOSBase = (struct DosLibrary *)OpenLibrary ("dos.library",36);
     if(DOSBase == NULL) {
         D(("midi: no dos??\n"));
         return FALSE;
     }
-       
+
     STRPTR name = midi_drv_api_config();
 
     InitSemaphore(&sem_mask);

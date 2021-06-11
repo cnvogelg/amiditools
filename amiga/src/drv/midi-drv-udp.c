@@ -3,7 +3,7 @@
  */
 
 #include <proto/exec.h>
-#include <proto/alib.h>
+#include <clib/alib_protos.h>
 #include <proto/timer.h>
 #include <libraries/bsdsocket.h>
 #include <midi/camddevices.h>
@@ -231,7 +231,7 @@ static void handle_peer_clock(struct sockaddr_in *this_peer_addr,
 
 static midi_drv_msg_t my_msg;
 
-static midi_drv_msg_t *handle_peer_midi_msg(struct sockaddr_in *this_peer_addr, 
+static midi_drv_msg_t *handle_peer_midi_msg(struct sockaddr_in *this_peer_addr,
                                             struct proto_packet *pkt, UBYTE *data_buf)
 {
     // check addr
@@ -253,7 +253,7 @@ static midi_drv_msg_t *handle_peer_midi_msg(struct sockaddr_in *this_peer_addr,
     return &my_msg;
 }
 
-static midi_drv_msg_t *handle_peer_midi_sysex(struct sockaddr_in *this_peer_addr, 
+static midi_drv_msg_t *handle_peer_midi_sysex(struct sockaddr_in *this_peer_addr,
                                               struct proto_packet *pkt, UBYTE *data_buf)
 {
     // check addr

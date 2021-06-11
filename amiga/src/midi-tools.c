@@ -1,7 +1,7 @@
 #include <exec/types.h>
 #include <proto/timer.h>
 #include <proto/exec.h>
-#include <proto/alib.h>
+#include <clib/alib_protos.h>
 #include <proto/dos.h>
 #include <devices/timer.h>
 
@@ -53,7 +53,7 @@ LONG midi_tools_parse_number_n(char *str, int max)
     if(str[0] == '$') {
         base = 16;
         str++;
-    } 
+    }
     else if((str[0] == '0') && (str[1] == 'x')) {
         base = 16;
         str+=2;

@@ -3,7 +3,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/camd.h>
-#include <proto/alib.h>
+#include <clib/alib_protos.h>
 #include <proto/timer.h>
 
 #include <midi/camd.h>
@@ -17,7 +17,7 @@
 static int task_setup(void);
 static void task_shutdown(void);
 
-static const char *TEMPLATE = 
+static const char *TEMPLATE =
     "V=VERBOSE/S,"
     "SMS=SYSEXMAXSIZE/K/N,"
     "OUTDEV/A,"
@@ -182,7 +182,7 @@ static int benchmark_samples(Sample *samples, ULONG num_samples)
         Printf("sending %ld samples...\n", num_samples);
 
     reset_samples(samples);
-    
+
     Sample *smp = samples;
     for(int i=0;i<num_samples;i++) {
         GetSysTime(&smp->ts_send);
@@ -244,7 +244,7 @@ static void main_loop(void)
 
     task_shutdown();
     free_samples(samples);
-} 
+}
 
 static void worker_loop(void)
 {
@@ -261,7 +261,7 @@ static void worker_loop(void)
         if((got_sig & SIGBREAKF_CTRL_C) == SIGBREAKF_CTRL_C) {
             break;
         }
-  
+
         if((got_sig & midi_mask) == midi_mask) {
             // get midi messages
             MidiMsg msg;
@@ -318,7 +318,7 @@ SAVEDS static void task_main(void)
         worker_status = 11;
         Signal(main_task, 1 << main_sig);
         return;
-    }    
+    }
 
     // report back that init is done
     D(("task: init done\n"));
