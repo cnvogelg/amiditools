@@ -1,5 +1,6 @@
 CAMD_NAMES=udp echo
 CAMD_PORTS=0 1 2 3 4 5 6 7
+VERSION ?= 1.0.0
 
 VBCC_TARGET_AMIGAOS ?= $(VBCC)/targets/m68k-amigaos/
 VBCC_INC = $(VBCC_TARGET_AMIGAOS)/include
@@ -37,10 +38,13 @@ TOOL_OUT_OBJS = $(patsubst %.c,$(OBJ_DIR)/%_$(CAMD_NAME)_$(CAMD_PORT).o,$(TOOL_O
 TOOL_IN = $(OBJ_DIR)/camd_$(CAMD_NAME)_in_$(CAMD_PORT).ptool
 TOOL_OUT = $(OBJ_DIR)/camd_$(CAMD_NAME)_out_$(CAMD_PORT).ptool
 
+DIST_DIR = dist
+DIST_ARCHIVE = $(DIST_DIR)/amiditools_bnp-$(VERSION).lha
+
 tools: init tool_in tool_out
 
 all:
-	for name in $(CAMD_NAMES) ; do \
+	@for name in $(CAMD_NAMES) ; do \
 		for port in $(CAMD_PORTS) ; do \
 			$(MAKE) CAMD_NAME=$$name CAMD_PORT=$$port ; \
 		done ; \
@@ -48,6 +52,27 @@ all:
 
 clean:
 	rm -rf $(OBJ_DIR)
+
+dist-clean:
+	rm -rf $(OBJ_DIR) $(DIST_DIR)
+
+dist: dist-all $(DIST_ARCHIVE)
+
+$(DIST_ARCHIVE):
+	@lha a $@ dist/*.ptool README.md
+
+dist-all:
+	@mkdir -p $(DIST_DIR)
+	@for name in $(CAMD_NAMES) ; do \
+		for port in $(CAMD_PORTS) ; do \
+			$(MAKE) CAMD_NAME=$$name CAMD_PORT=$$port dist-tool ; \
+		done ; \
+	done
+
+dist-tool: tools
+	@echo "  DIST  $(CAMD_NAME) $(CAMD_PORT)"
+	@cp $(TOOL_IN) $(DIST_DIR)/
+	@cp $(TOOL_OUT) $(DIST_DIR)/
 
 init: $(OBJ_DIR)
 
