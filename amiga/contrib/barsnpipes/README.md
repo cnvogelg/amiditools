@@ -5,14 +5,14 @@ the new CAMD drivers of this project.
 
 Its based on the CAMD Tool for the MMP driver written by Kjetil.S.Matheussen: See [CAMDlibrary40_4&BnPTools.lha](http://bnp.hansfaust.de/download/CAMDlibrary40_4&BnPTools.lha) for the original source.
 
-The sources need to be compiled with SAS/C 6.58.
+The sources here were ported to vbcc.
 
 Simply run:
 
-    smake CAMD_NAME=udp CAMD_PORT=0
+    make all
 
-to create in and out tools for CAMD driver *udp* and port 0.
+to create in and out tools for CAMD driver *udp* and *echo* for various ports.
 The resulting tools are named:
 
-* *camd_udp_in_0.ptool* for the input device
-* *camd_udp_out_0.ptool* for the output device
+* *camd_udp_in_0.ptool* for the input device on port 0
+* *camd_udp_out_0.ptool* for the output device on port 0

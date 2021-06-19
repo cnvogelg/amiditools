@@ -1,4 +1,4 @@
-/*     
+/*
 (c) Copyright 1988-1994 Microsoft Corporation.
 
 Microsoft Bars&Pipes Professional Source Code License
@@ -51,7 +51,7 @@ static struct Gadget midiinGadget7 = {
 	NULL,
 	NULL,
 	&midiinIText1,
-	NULL,
+	0,
 	NULL,
 	7,
 	NULL
@@ -75,7 +75,7 @@ static struct Gadget midiinGadget6 = {
 	NULL,
 	NULL,
 	&midiinIText2,
-	NULL,
+	0,
 	NULL,
 	4,
 	NULL
@@ -99,7 +99,7 @@ static struct Gadget midiinGadget5 = {
 	NULL,
 	NULL,
 	&midiinIText3,
-	NULL,
+	0,
 	NULL,
 	5,
 	NULL
@@ -123,7 +123,7 @@ static struct Gadget midiinGadget4 = {
 	NULL,
 	NULL,
 	&midiinIText4,
-	NULL,
+	0,
 	NULL,
 	2,
 	NULL
@@ -147,7 +147,7 @@ static struct Gadget midiinGadget3 = {
 	NULL,
 	NULL,
 	&midiinIText5,
-	NULL,
+	0,
 	NULL,
 	3,
 	NULL
@@ -171,7 +171,7 @@ static struct Gadget midiinGadget2 = {
 	NULL,
 	NULL,
 	&midiinIText6,
-	NULL,
+	0,
 	NULL,
 	6,
 	NULL
@@ -195,7 +195,7 @@ static struct Gadget midiinGadget1 = {
 	NULL,
 	NULL,
 	&midiinIText7,
-	NULL,
+	0,
 	NULL,
 	1,
 	NULL

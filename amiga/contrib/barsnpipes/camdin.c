@@ -1,4 +1,4 @@
-/*     
+/*
 (c) Copyright 1988-1994 Microsoft Corporation.
 
 Microsoft Bars&Pipes Professional Source Code License
@@ -35,10 +35,15 @@ In return, we simply require that you agree:
 #include <proto/graphics.h>
 #include <proto/intuition.h>
 #include <proto/camd.h>
+#include <clib/alib_protos.h>
+#include <exec/types.h>
 #include <exec/memory.h>
-#include <v.h>
-#include <tools.h>
+
 #include <string.h>
+
+#include "v.h"
+#include "tools.h"
+#include "compilerspecific.h"
 
 void kprintf(char *,...);
 
@@ -46,11 +51,7 @@ void kprintf(char *,...);
 
 #define ID_CAMI         MakeID(CAMD_NAME[0],CAMD_NAME[1],'I',CAMD_PORT[0])
 
-#pragma msg 62 ignore push
-
 #include "midiinw.c"
-
-#pragma msg 62 pop
 
 struct MIDITool
 {
@@ -68,26 +69,9 @@ struct Library *CamdBase;
 static long sysexbufsize=32768;
 static long msgqueue=8;
 
-
-/* Compiler glue: stub functions for camd.library */
-struct MidiNode *CreateMidi(Tag tag, ...)
-{	return CreateMidiA((struct TagItem *)&tag );
-}
-
-
-BOOL SetMidiAttrs(struct MidiNode *mi, Tag tag, ...)
-{	return SetMidiAttrsA(mi, (struct TagItem *)&tag );
-}
-
-
-struct MidiLink *AddMidiLink(struct MidiNode *mi, LONG type, Tag tag, ...)
-{	return AddMidiLinkA(mi, type, (struct TagItem *)&tag );
-}
-
-
 extern struct Functions *functions;
 
-static UWORD chip MidiIn[]=
+static UWORD CHIP MidiIn[]=
 {
 /*-------- plane # 0 --------*/
 
@@ -408,11 +392,11 @@ static void eventcode(void)
   }
 }
 
-static ULONG __asm __saveds midiinhook(register __a0 struct Hook *hook,
-                                       register __a2 struct MidiLink *link,
-                                       register __a1 MidiMsg *msg,
-                                       register __d0 long sysexlen,
-                                       register __a3 void *sysexdata)
+static ULONG ASMCALL SAVEDS midiinhook(REG(a0, struct Hook *hook),
+                                       REG(a2, struct MidiLink *link),
+                                       REG(a1, MidiMsg *msg),
+                                       REG(d0, long sysexlen),
+                                       REG(a3, void *sysexdata))
 {
   struct Event *event;
   struct MIDITool *tool;
@@ -486,7 +470,7 @@ struct ToolMaster *inittoolmaster(void)
     SetMidiAttrs(functions->CAMD_Node,MIDI_RecvHook,&hook,TAG_END);
   }
   ++functions->CAMD_count;
-  eventtask=CreateTask("camd in",40,eventcode,4000);
+  eventtask=CreateTask("camd in",40,(APTR)eventcode,4000);
   memset((char *)&master,0,sizeof(struct ToolMaster));
   master.toolid =ID_CAMI;
   master.image  =&MidiInimage;

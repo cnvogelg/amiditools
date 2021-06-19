@@ -1,4 +1,4 @@
-/*     
+/*
 (c) Copyright 1988-1994 Microsoft Corporation.
 
 Microsoft Bars&Pipes Professional Source Code License
@@ -36,20 +36,19 @@ In return, we simply require that you agree:
 #include <proto/intuition.h>
 #include <proto/camd.h>
 #include <exec/memory.h>
+
 #include <stdio.h>
 #include <string.h>
-#include <v.h>
-#include <tools.h>
+
+#include "v.h"
+#include "tools.h"
+#include "compilerspecific.h"
 
 #define MakeID(a,b,c,d)  ( (LONG)(a)<<24L | (LONG)(b)<<16L | (c)<<8 | (d) )
 
 #define ID_CAMO         MakeID(CAMD_NAME[0],CAMD_NAME[1],'O',CAMD_PORT[0])
 
-#pragma msg 62 ignore push
-
 #include "midiinw.c"
-
-#pragma msg 62 pop
 
 struct MIDITool
 {
@@ -62,7 +61,7 @@ struct MIDITool
 
 struct Library *CamdBase;
 
-static UWORD chip MidiOut[]={
+static UWORD CHIP MidiOut[]={
 /*-------- plane # 0 --------*/
 
   0x0000,  0x0000,
@@ -101,22 +100,6 @@ static struct Image MidiOutimage=
   MidiOut,
   0x3,0x0,NULL
 };
-
-
-/* Compiler glue: stub functions for camd.library */
-struct MidiNode *CreateMidi(Tag tag, ...)
-{	return CreateMidiA((struct TagItem *)&tag );
-}
-
-BOOL SetMidiAttrs(struct MidiNode *mi, Tag tag, ...)
-{	return SetMidiAttrsA(mi, (struct TagItem *)&tag );
-}
-
-
-struct MidiLink *AddMidiLink(struct MidiNode *mi, LONG type, Tag tag, ...)
-{	return AddMidiLinkA(mi, type, (struct TagItem *)&tag );
-}
-
 
 extern struct Functions *functions;
 

@@ -346,7 +346,7 @@ struct MacroTool {
     struct Tool tool;                   /* Tool definition. */
     struct Tool *intool;                /* Tool at start of macro. */
     struct MacroLine macroline[6];      /* Array of macrolines. */
-    short inline;                       /* Which line input goes to. */
+    short inLine;                       /* Which line input goes to. */
     short toolsleft;                    /* Left edge of tool list. */
     short toolswidth;                   /* Width of tools. */
     short toolsindent;                  /* Indentation into tools. */
@@ -817,7 +817,7 @@ struct Functions {
      */
 
     struct Transport *(* installtransportpl)(void(* routine)(void),char priority);
-                                       
+
 
 /* NewScrollingPopUpMenu provides ptr2 and index, which allow the
  * pop up requester to start in the middle instead of always at the
@@ -1225,7 +1225,7 @@ typedef struct ListItem *(*List_cast)();
 
 /* that is a store for the pageprint opts */
 
-struct PrintOpt{  
+struct PrintOpt{
 
     struct PrintOpt *next;
     int measuresperline;
