@@ -31,15 +31,17 @@ TOOLSTART_SRC = toolstart.c
 TOOL_IN_SRCS = camdin.c
 TOOL_OUT_SRCS = camdout.c
 
-OBJ_DIR = build
-TOOLSTART_OBJ = $(patsubst %.c,$(OBJ_DIR)/%.o,$(TOOLSTART_SRC))
-TOOL_IN_OBJS = $(patsubst %.c,$(OBJ_DIR)/%_$(CAMD_NAME)_$(CAMD_PORT).o,$(TOOL_IN_SRCS))
-TOOL_OUT_OBJS = $(patsubst %.c,$(OBJ_DIR)/%_$(CAMD_NAME)_$(CAMD_PORT).o,$(TOOL_OUT_SRCS))
-TOOL_IN = $(OBJ_DIR)/camd_$(CAMD_NAME)_in_$(CAMD_PORT).ptool
-TOOL_OUT = $(OBJ_DIR)/camd_$(CAMD_NAME)_out_$(CAMD_PORT).ptool
+BUILD_DIR = build
+TOOLSTART_OBJ = $(patsubst %.c,$(BUILD_DIR)/%.o,$(TOOLSTART_SRC))
+TOOL_IN_OBJS = $(patsubst %.c,$(BUILD_DIR)/%_$(CAMD_NAME)_$(CAMD_PORT).o,$(TOOL_IN_SRCS))
+TOOL_OUT_OBJS = $(patsubst %.c,$(BUILD_DIR)/%_$(CAMD_NAME)_$(CAMD_PORT).o,$(TOOL_OUT_SRCS))
+TOOL_IN = $(BUILD_DIR)/camd_$(CAMD_NAME)_in_$(CAMD_PORT).ptool
+TOOL_OUT = $(BUILD_DIR)/camd_$(CAMD_NAME)_out_$(CAMD_PORT).ptool
 
 DIST_DIR = dist
 DIST_ARCHIVE = $(DIST_DIR)/amiditools_bnp-$(VERSION).lha
+
+INSTALL_DIR=$(HOME)/amiga/shared
 
 tools: init tool_in tool_out
 
@@ -51,10 +53,10 @@ all:
 	done
 
 clean:
-	rm -rf $(OBJ_DIR)
+	rm -rf $(BUILD_DIR)
 
 dist-clean:
-	rm -rf $(OBJ_DIR) $(DIST_DIR)
+	rm -rf $(BUILD_DIR) $(DIST_DIR)
 
 dist: dist-all $(DIST_ARCHIVE)
 
@@ -74,7 +76,10 @@ dist-tool: tools
 	@cp $(TOOL_IN) $(DIST_DIR)/
 	@cp $(TOOL_OUT) $(DIST_DIR)/
 
-init: $(OBJ_DIR)
+install: all
+	cp $(BUILD_DIR)/*.ptool $(INSTALL_DIR)/
+
+init: $(BUILD_DIR)
 
 tool_in: $(TOOL_IN)
 
@@ -88,13 +93,13 @@ $(TOOL_OUT): $(TOOLSTART_OBJ) $(TOOL_OUT_OBJS)
 	@echo "  LINK $(<F)"
 	$(HIDE)$(LD) $^ -o $@ $(LDFLAGS)
 
-$(OBJ_DIR):
-	@mkdir -p $(OBJ_DIR)
+$(BUILD_DIR):
+	@mkdir -p $(BUILD_DIR)
 
-$(OBJ_DIR)/%.o : %.c
+$(BUILD_DIR)/%.o : %.c
 	@echo "  CC   $(<F)"
 	$(HIDE)$(CC) -c $(CFLAGS) $< -o $@
 
-$(OBJ_DIR)/%_$(CAMD_NAME)_$(CAMD_PORT).o : %.c
+$(BUILD_DIR)/%_$(CAMD_NAME)_$(CAMD_PORT).o : %.c
 	@echo "  CC   $(<F)"
 	$(HIDE)$(CC) -c $(CFLAGS) $< -o $@
