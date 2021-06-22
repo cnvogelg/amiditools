@@ -10,11 +10,9 @@
     *       ^^^^^^^^^^^                                       */
 
 
-//#include "compilerspecific.h"
+#include "compilerspecific.h"
 #include <exec/types.h>
 #include "v.h"
-
-#define SAVEDS __saveds
 
 long IntuitionBase;
 long GfxBase;

@@ -103,7 +103,7 @@ static struct Image MidiOutimage=
 
 extern struct Functions *functions;
 
-static void removetool(void)
+SAVEDS static void removetool(void)
 {
   --functions->CAMD_count;
   if(functions->CAMD_count==0)
@@ -115,7 +115,7 @@ static void removetool(void)
 }
 
 
-struct Tool *createtoolcode(struct MIDITool *copy)
+SAVEDS struct Tool *createtoolcode(struct MIDITool *copy)
 {
   struct MIDITool *tool=(struct MIDITool *)functions->myalloc(sizeof(struct MIDITool),MEMF_CLEAR);
 
@@ -143,7 +143,7 @@ struct Tool *createtoolcode(struct MIDITool *copy)
   return (struct Tool *)tool;
 }
 
-static struct Tool *loadtool(long file,long size)
+SAVEDS static struct Tool *loadtool(long file,long size)
 {
   struct MIDITool *tool=(struct MIDITool *)functions->myalloc(sizeof(struct MIDITool),MEMF_CLEAR);
 
@@ -161,7 +161,7 @@ static struct Tool *loadtool(long file,long size)
   return (struct Tool *)tool;
 }
 
-void deletetool(struct MIDITool *tool)
+SAVEDS void deletetool(struct MIDITool *tool)
 {
   if(tool->midilink)
       RemoveMidiLink(tool->midilink);
@@ -174,7 +174,7 @@ static struct Menu TitleMenu = {
     NULL,0,0,0,0,MENUENABLED,0,NULL
 };
 
-void edittoolcode(struct MIDITool *tool)
+SAVEDS static void edittoolcode(struct MIDITool *tool)
 {
     register struct IntuiMessage *message;
     register struct Window *window;
@@ -266,7 +266,7 @@ void edittoolcode(struct MIDITool *tool)
     functions->DeleteNewWindow(newwindow);
 }
 
-static struct Event *processeventcode(struct Event *event)
+SAVEDS static struct Event *processeventcode(struct Event *event)
 {
   struct MIDITool *tool=(struct MIDITool *)event->tool;
   struct String *string;

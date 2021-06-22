@@ -45,8 +45,6 @@ In return, we simply require that you agree:
 #include "tools.h"
 #include "compilerspecific.h"
 
-void kprintf(char *,...);
-
 #define MakeID(a,b,c,d)  ( (LONG)(a)<<24L | (LONG)(b)<<16L | (c)<<8 | (d) )
 
 #define ID_CAMI         MakeID(CAMD_NAME[0],CAMD_NAME[1],'I',CAMD_PORT[0])
@@ -111,7 +109,7 @@ static struct Image MidiInimage=
   0x3,0x0,NULL
 };
 
-struct Tool *createtoolcode(struct MIDITool *copy)
+SAVEDS struct Tool *createtoolcode(struct MIDITool *copy)
 {
   struct MIDITool *tool;
 
@@ -140,7 +138,7 @@ struct Tool *createtoolcode(struct MIDITool *copy)
   return (struct Tool *)tool;
 }
 
-static struct Tool *loadtool(long file,long size)
+SAVEDS static struct Tool *loadtool(long file,long size)
 {
   struct MIDITool *tool=(struct MIDITool *)functions->myalloc(sizeof(struct MIDITool),MEMF_CLEAR);
 
@@ -158,7 +156,7 @@ static struct Tool *loadtool(long file,long size)
   return (struct Tool *)tool;
 }
 
-void deletetoolcode(struct MIDITool *tool)
+SAVEDS void deletetoolcode(struct MIDITool *tool)
 {
   if(tool->midilink)
       RemoveMidiLink(tool->midilink);
@@ -169,7 +167,7 @@ static struct Menu TitleMenu = {
     NULL,0,0,0,0,MENUENABLED,0,NULL
 };
 
-void edittoolcode(struct MIDITool *tool)
+SAVEDS void edittoolcode(struct MIDITool *tool)
 {
   register struct IntuiMessage *message;
   register struct Window *window;
@@ -270,7 +268,7 @@ static unsigned short eventindex;
 struct Task *eventtask;
 long eventsignal;
 
-static void eventcode(void)
+SAVEDS static void eventcode(void)
 {
   struct Event *event;
   unsigned short index;
@@ -423,7 +421,7 @@ static ULONG ASMCALL SAVEDS midiinhook(REG(a0, struct Hook *hook),
   return 0;
 }
 
-void removetoolcode(void)
+SAVEDS void removetoolcode(void)
 {
   --functions->CAMD_count;
   if(functions->CAMD_count==0)
