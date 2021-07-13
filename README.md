@@ -93,7 +93,23 @@ It offers 8 input and output endpoints named:
  * Inputs `echo.in.0` ... `echo.in.7`
  * Output `echo.out.0` ... `echo.out.7`
 
-All MIDI data sent to an input is echoed to the corresponding output.
+All MIDI data sent to an output is echoed to the corresponding input.
+
+    midi-send --> echo.out.0 --> echo.in.0 --> midi-recv
+
+#### Usage Example
+
+ * Open an Amiga shell and launch [`midi-recv`](#midi-recv):
+
+        midi-recv dev echo.in.0
+
+ * Now open another shell and send some MIDI messages with
+   [`midi-send`](#midi-send):
+
+        midi-send dev echo.out.0 on c2 127
+        midi-send dev echo.out.0 off c2 0
+
+ * You see that the MIDI messages are forwarded from output 0 to input 0
 
 ### `udp` Driver
 
@@ -105,17 +121,27 @@ in and out ports:
  * Inputs `udp.in.0` ... `udp.in.7`
  * Output `udp.out.0` ... `udp.out.7`
 
+A client application called [`midi-udp-bridge`](#midi-udp-bridge) on your PC
+or Mac will receive the MIDI message and forward them to a local MIDI port
+there.
+
+All MIDI data sent to the output `udp.out.x` will be sent to the bridge
+host output port and the input `udp.in.x` will receive all data sent to
+the input port of the host bridge (option `-p IN:OUT`):
+
+    midi-send --> udp.out.x --> network --> midi-udp-bridge --> OUT midi port
+    midi-recv <-- udp.in.x <-- network <-- midi-udp-bridge <-- IN midi port
+
 Note: Do not confuse this protocol with the well known [RTP
 MIDI](https://john-lazzaro.github.io/rtpmidi/) or also called Apple MIDI. Our
-protocol is a lot simpler but needs a special host program called
-[`midi-udp-bridge`](#midi-udp-bridge) on your PC or Mac to send/receive data
-to/from this driver.
+protocol is a lot simpler but needs a special host program to send/receive
+data to/from this driver.
 
 Note2: This protocol currently does no error correction. I.e. if your network
 is crowded or lots of MIDI traffic is transferred then some MIDI messages
 might get lost. You have been warned :)
 
-### Activation
+#### Activation
 
 First of all make sure that your Amiga network stack is already setup and
 all network devices are configured correctly.
@@ -129,7 +155,7 @@ opens a UDP server socket and waits for an incoming client.
 The client is created then on the host Mac or PC side with the
 [`midi-udp-bridge`](#midi-udp-bridge) tool.
 
-### Configuration
+#### Configuration
 
 By default the driver is configured to work with settings that match most
 typical use cases, including emulator and real Amiga setups.
@@ -170,6 +196,41 @@ An Example config might look like:
     HOST_NAME my_amiga PORT 1234 SYSEX_SIZE 32768
 
 Copy the config file to `ENVARC:midi/udp.config` to persist it for later use.
+
+### Usage Example
+
+ * Make sure the `udp` driver is running and call [`midi-info`](#midi-info)
+ * Now on your Mac/PC call [`midi-udp-bridge`](#midi-udp-bridge) and
+   assign a distinct MIDI in and out port (I use virtual ports on Mac here):
+
+        midi-udp-bridge -p "Amiga In:Amiga Out" -v
+
+ * If all worked out well then the connection is established and reported back
+   by the bridge
+ * On your Mac/PC run [`receivemidi`](https://github.com/gbevin/ReceiveMIDI)
+   to see the incoming traffic on port "Amiga Out"
+
+        receivemidi dev "Amiga Out"
+
+ * Now send some MIDI messages from your Amiga shell:
+
+        midi-send dev udp.out.0 on c2 127
+        midi-send dev udp.out.0 off c2 0
+
+ * You should see the messages on your Mac/PC on port "Amiga Out".
+ * One direction already works! Now test the other one:
+ * On your Amiga shell run:
+
+        midi-recv dev udp.in.0
+
+ * On your Mac/PC send MIDI data with
+   [`sendmidi`](https://github.com/gbevin/SendMIDI):
+
+        sendmidi dev "Amiga In" on c2 127
+        sendmidi dev "Amiga In" off c2 0
+
+ * You should see the messages on your Amiga shell
+ * Both directions work! Job done :)
 
 
 ## CAMD MIDI Tools
