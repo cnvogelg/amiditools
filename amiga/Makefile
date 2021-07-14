@@ -115,7 +115,7 @@ init: $(BIN_DIR) $(OBJ_DIR)
 
 build: $(TOOLS)
 
-release: 
+release:
 	$(MAKE) FLAVOR=release
 
 $(BIN_DIR):
@@ -142,6 +142,9 @@ clean:
 
 clean-all:
 	rm -rf $(BUILD_DIR) $(DIST_BASE_DIR)
+
+clean-install:
+	rm -rf $(INSTALL_FILES) $(INSTALL_DIR)/midi-test
 
 dist-flavor: init $(DIST_DIR) $(DIST_FILES)
 

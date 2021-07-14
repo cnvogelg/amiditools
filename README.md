@@ -324,7 +324,7 @@ Options:
 
 Example:
 
-    midi-echo IN echo.out.0 OUT echo.in.1
+    midi-echo IN udp.in.0 OUT udp.out.1
 
 ### `midi-perf`
 
@@ -373,7 +373,7 @@ Example:
 
 ## CAMD Addons
 
-### BarnsPipes Tools
+### Bars n Pipes Tools
 
 To access the new CAMD drivers presented here with the [BarsnPipes Sequencer]
 (http://bnp.hansfaust.de) on the Amiga a "ptool" plugin is available for each
