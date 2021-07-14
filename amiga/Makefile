@@ -156,6 +156,7 @@ dist-clean: clean-all
 $(DIST_ARCHIVE):
 	@$(MAKE) dist-flavor
 	@$(MAKE) dist-flavor FLAVOR=release
-	@lha a $@ dist/debug dist/release README.md
+	@echo "  LHA  $@"
+	@cd dist && lha a ../$@ debug release ../../README.md
 
 .PHONY: dist

@@ -61,7 +61,8 @@ dist-clean:
 dist: dist-all $(DIST_ARCHIVE)
 
 $(DIST_ARCHIVE):
-	@lha a $@ dist/*.ptool README.md
+	@echo "  LHA  $@"
+	@cd dist && lha a ../$@ *.ptool ../README.md
 
 dist-all:
 	@mkdir -p $(DIST_DIR)
